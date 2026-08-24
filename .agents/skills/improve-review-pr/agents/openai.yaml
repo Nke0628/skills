@@ -1,0 +1,5 @@
+interface:
+  display_name: "レビューを改善"
+  short_description: "修正PRから見落としパターンを学習しレビュー基準に追加"
+policy:
+  allow_implicit_invocation: false
