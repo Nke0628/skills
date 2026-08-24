@@ -1,0 +1,5 @@
+interface:
+  display_name: "コードベースアーキテクチャの改善"
+  short_description: "アーキテクチャ改善案を見つけて問い詰める"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Ask Matt"
+  short_description: "適切なスキルやワークフローを見つける"
+policy:
+  allow_implicit_invocation: false

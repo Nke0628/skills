@@ -1,0 +1,5 @@
+interface:
+  display_name: "ライティング・フラグメント"
+  short_description: "生の文章断片を採掘する"
+policy:
+  allow_implicit_invocation: false

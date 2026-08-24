@@ -1,0 +1,5 @@
+interface:
+  display_name: "ドキュメント作成付き徹底インタビュー"
+  short_description: "デザインを問い詰めて資料も作成"
+policy:
+  allow_implicit_invocation: false

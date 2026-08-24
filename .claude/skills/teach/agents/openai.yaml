@@ -1,0 +1,5 @@
+interface:
+  display_name: "Teach"
+  short_description: "ガイド付きワークスペースで概念を学ぶ"
+policy:
+  allow_implicit_invocation: false

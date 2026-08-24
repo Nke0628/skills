@@ -1,0 +1,5 @@
+interface:
+  display_name: "ライティング・シェイプ"
+  short_description: "生素材を記事へと整形する"
+policy:
+  allow_implicit_invocation: false

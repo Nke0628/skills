@@ -1,0 +1,5 @@
+interface:
+  display_name: "グリルミー"
+  short_description: "インタビューを通じて計画を研ぎ澄ます"
+policy:
+  allow_implicit_invocation: false

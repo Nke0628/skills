@@ -1,0 +1,5 @@
+interface:
+  display_name: "Wait What"
+  short_description: "それを再提示して: もっとシンプルに、足りていない文脈とともに"
+policy:
+  allow_implicit_invocation: false

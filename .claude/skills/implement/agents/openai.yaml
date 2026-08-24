@@ -1,0 +1,5 @@
+interface:
+  display_name: "実装"
+  short_description: "仕様書やチケットから作業を構築"
+policy:
+  allow_implicit_invocation: false

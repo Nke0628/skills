@@ -1,0 +1,3 @@
+interface:
+  display_name: "Code Review"
+  short_description: "標準と仕様に沿って差分をレビューする"

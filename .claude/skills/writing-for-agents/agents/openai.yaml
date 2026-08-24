@@ -1,0 +1,3 @@
+interface:
+  display_name: "エージェント向けライティング"
+  short_description: "エージェントが消費するドキュメントを書く"

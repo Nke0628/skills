@@ -1,0 +1,5 @@
+interface:
+  display_name: "To Questionnaire"
+  short_description: "誰かに答えてもらうため、質問を文書に前もって詰め込む"
+policy:
+  allow_implicit_invocation: false
