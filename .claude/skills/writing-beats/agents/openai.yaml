@@ -1,5 +1,0 @@
-interface:
-  display_name: "ライティング・ビート"
-  short_description: "生素材をビートへと組み立てる"
-policy:
-  allow_implicit_invocation: false
