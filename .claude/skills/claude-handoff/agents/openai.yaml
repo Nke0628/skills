@@ -1,5 +1,0 @@
-interface:
-  display_name: "Claude Handoff"
-  short_description: "バックグラウンドエージェントに引き継ぐ"
-policy:
-  allow_implicit_invocation: false
