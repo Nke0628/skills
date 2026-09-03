@@ -1,5 +1,0 @@
-interface:
-  display_name: "Wayfinder"
-  short_description: "大きな取り組みを意思決定チケットとしてマッピングする"
-policy:
-  allow_implicit_invocation: false

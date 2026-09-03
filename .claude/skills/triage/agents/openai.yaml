@@ -1,5 +1,0 @@
-interface:
-  display_name: "Triage"
-  short_description: "イシューをトリアージ・ロールに沿って進める"
-policy:
-  allow_implicit_invocation: false
