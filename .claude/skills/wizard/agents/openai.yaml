@@ -1,3 +1,0 @@
-interface:
-  display_name: "ウィザード"
-  short_description: "対話形式のセットアップウィザードを生成する"
