@@ -1,10 +1,10 @@
 ---
-name: ask-matt
+name: ask-skill
 description: どのスキルやフローが自分の状況に合うかを尋ねる。このリポジトリのスキル群に対するルーター。
 disable-model-invocation: true
 ---
 
-# Ask Matt
+# Ask Skill
 
 すべてのスキルを覚えていられるわけではないので、尋ねればいい。
 

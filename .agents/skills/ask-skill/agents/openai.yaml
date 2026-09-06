@@ -1,5 +1,5 @@
 interface:
-  display_name: "Ask Matt"
+  display_name: "Ask Skill"
   short_description: "適切なスキルやワークフローを見つける"
 policy:
   allow_implicit_invocation: false
