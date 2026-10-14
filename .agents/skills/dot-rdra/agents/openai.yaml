@@ -1,0 +1,3 @@
+interface:
+  display_name: "Dot RDRA"
+  short_description: "RDRA 3.0の4モードで要求分析を支援する"
