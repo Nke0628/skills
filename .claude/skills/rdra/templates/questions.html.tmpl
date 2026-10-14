@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RDRA 質問</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #1f2328; --muted: #656d76; --border: #d8dee4;
+    --accent: #2f6feb; --accent-weak: #e8f0fe;
+    --high: #c62828; --high-bg: #fdecea; --mid: #b26a00; --mid-bg: #fff4e0; --low: #57606a; --low-bg: #eef1f4;
+    --ok: #1a7f37; --ok-bg: #e6f4ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a21; --text: #e6e8eb; --muted: #9aa4af; --border: #2c323c;
+      --accent: #6ea8fe; --accent-weak: #1c2a44;
+      --high: #ff8a80; --high-bg: #3a1d1d; --mid: #ffc266; --mid-bg: #3a2e14; --low: #b0b8c1; --low-bg: #232831;
+      --ok: #7ee2a8; --ok-bg: #16301f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .bar { max-width: 860px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  h1 { font-size: 17px; margin: 0; flex: 1 1 auto; }
+  .stats { color: var(--muted); font-size: 13px; }
+  .actions { display: flex; gap: 8px; }
+  button { font: inherit; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .filters { max-width: 860px; margin: 0 auto; padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+  .chip[aria-pressed="true"] { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+  .sep { width: 1px; background: var(--border); margin: 0 4px; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .card.answered { border-left: 4px solid var(--ok); }
+  .head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .tag { font-size: 12px; padding: 1px 8px; border-radius: 6px; background: var(--low-bg); color: var(--low); }
+  .tag.p-高 { background: var(--high-bg); color: var(--high); font-weight: 600; }
+  .tag.p-中 { background: var(--mid-bg); color: var(--mid); }
+  .tag.st-反映済, .tag.st-許容 { background: var(--ok-bg); color: var(--ok); }
+  .qid { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  dl { margin: 0 0 12px; display: grid; grid-template-columns: 4.5em 1fr; gap: 4px 12px; font-size: 14px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  .proposal { background: var(--accent-weak); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+  .proposal b { color: var(--accent); }
+  fieldset { border: 0; padding: 0; margin: 0 0 8px; display: grid; gap: 6px; }
+  label.opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer; }
+  label.opt:has(input:checked) { border-color: var(--accent); background: var(--accent-weak); }
+  label.opt input { margin-top: 4px; }
+  textarea { width: 100%; min-height: 56px; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px; resize: vertical; }
+  .prev { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .empty { text-align: center; color: var(--muted); padding: 32px 0; }
+  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+    padding: 8px 16px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 560px) { dl { grid-template-columns: 1fr; } dt { margin-top: 4px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1 id="title">RDRA 質問</h1>
+    <span class="stats" id="stats"></span>
+    <div class="actions">
+      <button id="copy" type="button">コピー</button>
+      <button id="save" class="primary" type="button">回答を保存</button>
+    </div>
+  </div>
+  <div class="filters" id="filters"></div>
+</header>
+<main id="list"></main>
+<div class="toast" id="toast" role="status"></div>
+<script>
+const DATA = /*__DATA__*/null;
+const STORE_KEY = "rdra-answers:" + DATA.system;
+const OPEN = new Set(["未回答", "回答済"]);
+
+let answers = Object.assign({}, DATA.answers);
+try {
+  const draft = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+  if (draft && draft.answers) Object.assign(answers, draft.answers);
+} catch (e) { /* ストレージが使えない環境では下書きを使わない */ }
+
+const filters = { priority: new Set(["高", "中", "低"]), phase: "all", status: "open" };
+let fileHandle = null;
+let dirty = false;
+
+document.getElementById("title").textContent = DATA.system + " — RDRA 質問";
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) n.append(c);
+  return n;
+}
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+function hasAnswer(id) {
+  const a = answers[id];
+  return !!(a && ((a.choice || "").trim() || (a.note || "").trim()));
+}
+
+function persistDraft() {
+  dirty = true;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify({ answers })); } catch (e) {}
+  renderStats();
+}
+
+function setAnswer(id, patch) {
+  answers[id] = Object.assign({ choice: "", note: "" }, answers[id], patch);
+  persistDraft();
+  const card = document.getElementById("card-" + id);
+  if (card) card.classList.toggle("answered", hasAnswer(id));
+}
+
+const phaseLabel = ph => ph === 0 ? "初期要望" : "フェーズ" + ph;
+
+function renderFilters() {
+  const f = document.getElementById("filters");
+  f.replaceChildren();
+  const chip = (label, pressed, onclick) =>
+    el("button", { class: "chip", type: "button", "aria-pressed": String(pressed), onclick }, label);
+  for (const p of ["高", "中", "低"]) {
+    f.append(chip("優先度 " + p, filters.priority.has(p), () => {
+      filters.priority.has(p) ? filters.priority.delete(p) : filters.priority.add(p); render();
+    }));
+  }
+  f.append(el("span", { class: "sep" }));
+  const phases = [...new Set(DATA.questions.map(q => q.phase))].sort();
+  for (const ph of ["all", ...phases]) {
+    f.append(chip(ph === "all" ? "全フェーズ" : phaseLabel(ph), filters.phase === ph, () => { filters.phase = ph; render(); }));
+  }
+  f.append(el("span", { class: "sep" }));
+  for (const [k, label] of [["open", "未解決"], ["all", "すべて"]]) {
+    f.append(chip(label, filters.status === k, () => { filters.status = k; render(); }));
+  }
+}
+
+function renderStats() {
+  const open = DATA.questions.filter(q => OPEN.has(q.status));
+  const done = open.filter(q => hasAnswer(q.id)).length;
+  const hi = open.filter(q => q.priority === "高");
+  const hiDone = hi.filter(q => hasAnswer(q.id)).length;
+  document.getElementById("stats").textContent =
+    `未解決 ${open.length} 問中 ${done} 問に回答(優先度・高 ${hiDone}/${hi.length})` + (dirty ? " ・未保存" : "");
+}
+
+function card(q) {
+  const a = answers[q.id] || { choice: "", note: "" };
+  const name = "c-" + q.id;
+  const fs = el("fieldset", {});
+  for (const c of q.choices) {
+    const input = el("input", { type: "radio", name, value: c.key, onchange: () => setAnswer(q.id, { choice: c.key }) });
+    if (a.choice === c.key) input.checked = true;
+    fs.append(el("label", { class: "opt" }, input, el("span", {}, `${c.key}) ${c.text}`)));
+  }
+  const ta = el("textarea", { placeholder: q.choices.length ? "補足・その他の内容(任意)" : "回答", oninput: e => setAnswer(q.id, { note: e.target.value }) });
+  ta.value = a.note || "";
+  const meta = el("dl", {});
+  for (const [k, v] of [["対象", q.target], ["根拠", q.basis], ["観点", q.viewpoint]]) {
+    if (v) meta.append(el("dt", {}, k), el("dd", {}, v));
+  }
+  return el("article", { class: "card" + (hasAnswer(q.id) ? " answered" : ""), id: "card-" + q.id },
+    el("div", { class: "head" },
+      el("span", { class: "tag p-" + q.priority }, "優先度 " + q.priority),
+      el("span", { class: "tag" }, phaseLabel(q.phase)),
+      el("span", { class: "tag st-" + q.status }, q.status),
+      el("span", { class: "qid" }, q.id)),
+    el("h2", {}, q.title),
+    meta,
+    q.proposal ? el("div", { class: "proposal" }, el("b", {}, "AIの提案 "), q.proposal) : null,
+    fs, ta,
+    q.answer ? el("div", { class: "prev" }, "記録済みの回答: " + q.answer) : null);
+}
+
+function render() {
+  renderFilters();
+  const list = document.getElementById("list");
+  const order = { "高": 0, "中": 1, "低": 2 };
+  const qs = DATA.questions
+    .filter(q => filters.priority.has(q.priority))
+    .filter(q => filters.phase === "all" || q.phase === filters.phase)
+    .filter(q => filters.status === "all" || OPEN.has(q.status))
+    .sort((x, y) => order[x.priority] - order[y.priority] || x.id.localeCompare(y.id));
+  list.replaceChildren(...(qs.length ? qs.map(card) : [el("p", { class: "empty" }, "該当する質問はありません")]));
+  renderStats();
+}
+
+function payload() {
+  const out = {};
+  for (const [id, a] of Object.entries(answers)) if (hasAnswer(id)) out[id] = { choice: a.choice || "", note: a.note || "" };
+  return JSON.stringify({ version: 1, savedAt: new Date().toISOString(), answers: out }, null, 2) + "\n";
+}
+
+function saved(msg) {
+  dirty = false;
+  try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+  renderStats();
+  toast(msg);
+}
+
+document.getElementById("save").addEventListener("click", async () => {
+  const text = payload();
+  if (window.showSaveFilePicker) {
+    try {
+      if (!fileHandle) {
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName: "answers.json",
+          types: [{ description: "JSON", accept: { "application/json": [".json"] } }],
+        });
+      }
+      const w = await fileHandle.createWritable();
+      await w.write(text); await w.close();
+      return saved("answers.json に保存しました");
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+    }
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  el("a", { href: url, download: "answers.json" }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saved("ダウンロードしました。docs/rdra/answers.json に置いてください");
+});
+
+document.getElementById("copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(payload()); toast("回答JSONをコピーしました"); }
+  catch (e) { toast("コピーできませんでした"); }
+});
+
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+render();
+</script>
+</body>
+</html>

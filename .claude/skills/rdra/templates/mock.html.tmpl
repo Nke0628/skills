@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap">
+<style>
+  /* 左に画面の一覧、中央に端末の枠に入れたワイヤーフレーム、右に注記。中身は灰色で、色は操作ボタンだけ */
+  :root {
+    --desk: #e9ecea; --panel: #ffffff; --ink: #1b242c; --muted: #5d6973; --line: #cfd6d9;
+    --wire: #ffffff; --wire-ink: #2b3339; --wire-line: #c3c9cc; --wire-fill: #eef1f2; --wire-sub: #8a949b;
+    --accent: #0d6b67; --accent-ink: #ffffff; --danger: #a8291f; --admin: #34404a;
+    --ok: #256b43; --ok-bg: #e3f1e8; --hyp: #8a5200; --hyp-bg: #fbeed6; --src: #3f5a74; --src-bg: #e6edf4;
+    --body: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --desk: #0f1418; --panel: #172027; --ink: #e4eaee; --muted: #98a6b1; --line: #2a3640;
+      --wire: #1d262d; --wire-ink: #dfe5e8; --wire-line: #3a4650; --wire-fill: #252f37; --wire-sub: #7d8a94;
+      --accent: #56c2b8; --accent-ink: #0f1418; --danger: #f4938a; --admin: #0b1013;
+      --ok: #82cfa0; --ok-bg: #173022; --hyp: #f0b860; --hyp-bg: #33270f; --src: #a5bdd4; --src-bg: #1c2935;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --desk: #0f1418; --panel: #172027; --ink: #e4eaee; --muted: #98a6b1; --line: #2a3640;
+    --wire: #1d262d; --wire-ink: #dfe5e8; --wire-line: #3a4650; --wire-fill: #252f37; --wire-sub: #7d8a94;
+    --accent: #56c2b8; --accent-ink: #0f1418; --danger: #f4938a; --admin: #0b1013;
+    --ok: #82cfa0; --ok-bg: #173022; --hyp: #f0b860; --hyp-bg: #33270f; --src: #a5bdd4; --src-bg: #1c2935;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--desk); color: var(--ink); font: 14px/1.6 var(--body); }
+  .top { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding-inline: 16px; padding-block: 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  .top h1 { font-size: 16px; margin: 0; }
+  .top .meta { color: var(--muted); font-size: 12px; flex: 1 1 auto; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .toggle button { border: 0; border-radius: 0; background: transparent; color: var(--muted); padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .toggle button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+  .tbtn { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tbtn:focus-visible, .toggle button:focus-visible, nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #msg { font-size: 12px; color: var(--ok); }
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 56px); }
+  nav.screens { background: var(--panel); border-right: 1px solid var(--line); padding-block: 12px 40px; padding-inline: 0; overflow-y: auto; }
+  .ng { font-size: 11px; color: var(--muted); letter-spacing: .06em; padding: 14px 16px 4px; font-weight: 700; }
+  nav.screens a { display: block; padding: 5px 16px; color: var(--ink); text-decoration: none; font-size: 13px; border-left: 3px solid transparent; }
+  nav.screens a:hover { background: var(--desk); }
+  nav.screens a.on { border-left-color: var(--accent); background: var(--desk); font-weight: 700; }
+  sup { font-size: 10px; color: var(--hyp); margin-left: 4px; }
+  main { min-width: 0; padding-inline: 24px; padding-block: 20px 60px; }
+  .view { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; }
+  .view[hidden] { display: none; }
+  .vh { grid-column: 1 / -1; }
+  .crumb { font-size: 12px; color: var(--muted); }
+  .vh h2 { margin: 2px 0; font-size: 22px; }
+  .sub { font-size: 12px; color: var(--muted); }
+  .stage { min-width: 0; display: flex; justify-content: center; align-items: flex-start; }
+  .device { width: 100%; max-width: 920px; border-radius: 10px; border: 1px solid var(--line); background: var(--wire); overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+  body.sp .device { max-width: 390px; border-radius: 28px; border: 10px solid var(--ink); }
+  .app { color: var(--wire-ink); font-size: 13.5px; }
+  .bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--wire-fill); border-bottom: 1px solid var(--wire-line); }
+  .bar span { font-size: 12px; color: var(--wire-sub); }
+  .app.admin .bar { background: var(--admin); color: #ffffff; border-bottom-color: var(--admin); }
+  .app.admin .bar span { color: #c9d2d8; }
+  .steps { display: flex; gap: 4px; overflow-x: auto; padding: 8px 12px; border-bottom: 1px solid var(--wire-line); }
+  .steps a { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--wire-line); color: var(--wire-sub); text-decoration: none; white-space: nowrap; }
+  .steps a.on { background: var(--wire-ink); color: var(--wire); border-color: var(--wire-ink); }
+  .page { padding: 16px 18px 22px; display: flex; flex-direction: column; gap: 16px; }
+  .page h3 { margin: 0; font-size: 18px; }
+  .block { border: 1px solid var(--wire-line); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .block.center { align-items: center; text-align: center; padding: 28px 14px; }
+  .block.row { flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+  .bh { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .uc { font-size: 11px; color: var(--wire-sub); font-family: var(--mono); }
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 16px; }
+  body.sp .form, body.sp .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .f > span:first-child { font-size: 12px; color: var(--wire-sub); }
+  .in { display: flex; align-items: center; gap: 6px; }
+  .in em { font-style: normal; font-size: 12px; color: var(--wire-sub); }
+  input, select { font: inherit; font-size: 13px; width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--wire-line); border-radius: 6px;
+    background: var(--wire); color: var(--wire-ink); opacity: 1; }
+  .seg { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--wire-line); border-radius: 6px; overflow: hidden; width: fit-content; }
+  .seg b { font-weight: 400; font-size: 13px; padding: 6px 14px; border-right: 1px solid var(--wire-line); }
+  .seg b:last-child { border-right: 0; }
+  .seg b.on { background: var(--wire-ink); color: var(--wire); }
+  .acts { display: flex; justify-content: flex-end; }
+  .btn { font: inherit; font-size: 13px; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--wire-line); background: var(--wire); color: var(--wire-ink); cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
+  .btn.ghost { border-style: dashed; align-self: flex-start; }
+  .btn.mini { padding: 3px 10px; font-size: 12px; }
+  .hint { color: var(--wire-sub); font-size: 12.5px; margin: 0; }
+  .warn { margin: 0; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--danger); color: var(--danger); font-size: 13px; }
+  .tw { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th { text-align: left; font-weight: 700; color: var(--wire-sub); font-size: 11.5px; padding: 6px 8px; border-bottom: 1px solid var(--wire-line); white-space: nowrap; }
+  td { padding: 8px; border-bottom: 1px solid var(--wire-line); }
+  td i { display: block; height: 8px; border-radius: 4px; background: var(--wire-fill); min-width: 40px; }
+  td.ra { text-align: right; white-space: nowrap; }
+  td.ra .btn + .btn { margin-left: 4px; }
+  .chart { position: relative; border: 1px dashed var(--wire-line); border-radius: 6px; height: 140px; padding: 8px; }
+  .chart span { position: absolute; left: 10px; top: 8px; font-size: 11.5px; color: var(--wire-sub); }
+  .chart svg { position: absolute; left: 10px; right: 10px; bottom: 10px; width: calc(100% - 20px); height: 90px; }
+  .chart polyline { fill: none; stroke: var(--wire-sub); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .chart polyline.b { stroke-dasharray: 5 4; }
+  details.edit summary { font-size: 12px; color: var(--wire-sub); cursor: pointer; }
+  details.edit .form { margin-top: 10px; }
+  aside.notes { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; align-self: start; min-width: 0; }
+  aside.notes h4 { margin: 0 0 8px; font-size: 13px; }
+  aside.notes ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  aside.notes li b { font-size: 13px; margin-right: 6px; }
+  .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.hyp { background: var(--hyp-bg); color: var(--hyp); font-weight: 700; }
+  .badge.src { background: var(--src-bg); color: var(--src); }
+  .qref { font-family: var(--mono); font-size: 11px; color: var(--accent); margin-left: 4px; }
+  .memo { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+  .memo label { font-size: 12px; color: var(--muted); }
+  .memo textarea { font: inherit; font-size: 13px; color: var(--ink); background: var(--desk); border: 1px dashed var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; width: 100%; }
+  .memo textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .memo textarea.filled { border-style: solid; border-color: var(--accent); background: var(--panel); }
+  .pager { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; }
+  #out { position: absolute; left: -9999px; white-space: pre; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    nav.screens { border-right: 0; border-bottom: 1px solid var(--line); max-height: 180px; display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 16px; }
+    .ng { width: 100%; padding: 6px 0 0; }
+    nav.screens a { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+    main { padding-inline: 16px; }
+    .view { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>__SYSTEM__ 画面モック</h1>
+  <div class="meta">__META__ ・ docs/rdra の表から生成した粗いワイヤーフレームです。見た目ではなく「どの画面で何を入力・確認するか」を確かめるためのものです</div>
+  <div class="tools">
+    <div class="toggle" role="group" aria-label="表示する幅">
+      <button type="button" id="pc" aria-pressed="true">PC</button><button type="button" id="sp" aria-pressed="false">スマートフォン</button>
+    </div>
+    <button type="button" class="tbtn" id="copy">メモをコピー</button><span id="msg" role="status"></span>
+  </div>
+</header>
+<div class="layout">
+<nav class="screens" aria-label="画面の一覧"><!--__NAV__--></nav>
+<main>
+<!--__VIEWS__-->
+<div class="pager"><button type="button" class="tbtn" id="prev">← 前の画面</button><button type="button" class="tbtn" id="next">次の画面 →</button></div>
+</main>
+</div>
+<pre id="out" aria-hidden="true"></pre>
+<script>
+(function () {
+  var STORE = "__STORE__";
+  function load(k, d) { try { var v = localStorage.getItem(STORE + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(STORE + k, JSON.stringify(v)); } catch (e) {} }
+  var views = Array.prototype.slice.call(document.querySelectorAll(".view"));
+  var links = Array.prototype.slice.call(document.querySelectorAll("nav.screens a"));
+  var cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(views.length - 1, i));
+    views.forEach(function (v, j) { v.hidden = j !== cur; });
+    links.forEach(function (a) { a.classList.toggle("on", +a.dataset.i === cur); });
+    window.scrollTo(0, 0);
+  }
+  function fromHash() { var m = /^#scr-(\d+)$/.exec(location.hash); return m ? +m[1] : 0; }
+  window.addEventListener("hashchange", function () { show(fromHash()); });
+  document.getElementById("prev").addEventListener("click", function () { location.hash = "scr-" + Math.max(0, cur - 1); });
+  document.getElementById("next").addEventListener("click", function () { location.hash = "scr-" + Math.min(views.length - 1, cur + 1); });
+  show(fromHash());
+
+  var pc = document.getElementById("pc"), sp = document.getElementById("sp");
+  function mode(isSp) { document.body.classList.toggle("sp", isSp); sp.setAttribute("aria-pressed", isSp); pc.setAttribute("aria-pressed", !isSp); save(":mode", isSp); }
+  pc.addEventListener("click", function () { mode(false); });
+  sp.addEventListener("click", function () { mode(true); });
+  mode(!!load(":mode", false));
+
+  var memos = load(":memo", {});
+  var areas = Array.prototype.slice.call(document.querySelectorAll(".memo textarea"));
+  function mark(t) { t.classList.toggle("filled", !!t.value.trim()); }
+  areas.forEach(function (t) {
+    t.value = memos[t.dataset.key] || ""; mark(t);
+    t.addEventListener("input", function () { memos[t.dataset.key] = t.value; save(":memo", memos); mark(t); });
+  });
+  var msg = document.getElementById("msg"), out = document.getElementById("out");
+  document.getElementById("copy").addEventListener("click", function () {
+    var d = new Date(), lines = ["# 画面モックへのメモ(" + d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + ")", ""], n = 0;
+    areas.forEach(function (t) { var v = t.value.trim(); if (v) { n++; lines.push("## " + t.dataset.label, "", v, ""); } });
+    if (!n) { msg.textContent = "コピーするメモがありません"; return; }
+    var text = lines.join("\n");
+    out.textContent = text;
+    function fallback() {
+      out.style.left = "0"; var r = document.createRange(); r.selectNodeContents(out);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      msg.textContent = "選択しました。Ctrl+C(⌘C)でコピーしてください";
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { msg.textContent = "コピーしました(" + n + "画面分)"; }, fallback);
+    } else { fallback(); }
+  });
+})();
+</script>
+</body>
+</html>
