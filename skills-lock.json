@@ -7,12 +7,6 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "0cd14026efa0330083cbc7adf590976c162b60e02f696a8dcce96f0b4dab8a72"
     },
-    "diagnosing-bugs": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
-      "computedHash": "37b5e9c624513551da790b52864dc8c84bff996a6d03a380cc6facdcc0a88354"
-    },
     "domain-modeling": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -73,12 +67,6 @@
       "skillPath": "skills/engineering/prototype/SKILL.md",
       "computedHash": "d3fc74689bd993e39c44bfae510d014eecffbeec2922764b065377fd1327c0f6"
     },
-    "research": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "skillPath": "skills/engineering/research/SKILL.md",
-      "computedHash": "c8c1cba327a6f824b554cd978079a3dadd7406d73174f8fb9bfef58824691970"
-    },
     "resolving-merge-conflicts": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -96,12 +84,6 @@
       "sourceType": "github",
       "skillPath": "skills/productivity/teach/SKILL.md",
       "computedHash": "b8a69574c7a019bed84e84313dc8bf02e1d1bf925ba43057d433217c63863206"
-    },
-    "to-questionnaire": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "skillPath": "skills/productivity/to-questionnaire/SKILL.md",
-      "computedHash": "befbec7005695163741a57bc94810dc5048fb766baaa485d5160b1d7f86335c1"
     },
     "to-spec": {
       "source": "mattpocock/skills",
