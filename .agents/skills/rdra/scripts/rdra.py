@@ -9,8 +9,7 @@
   set-phase N [--force 理由]  現在のフェーズを記録する(今より小さい番号には戻さない)
   accept KEY 理由  チェック指摘を「許容」として記録する
   reopen 理由     完成の記録を外す(完成後に表・質問を変えるとき)
-  lint-request [--draft]  初期要望.txt(または初期要望.draft.txt)の形を点検する(致命があれば終了コード1)
-  adopt [--replace]  人が見直した初期要望.draft.txt を初期要望.txt にする(印を消し、下書きを削除)
+  set-name 名前   システム名を記録する(PRD・質問画面の表題になる)
   next-qid        次の質問IDを出す
   html            questions.md から questions.html を生成する
   merge-answers   answers.json を questions.md に取り込む
@@ -18,7 +17,6 @@
   analysis        analysis.md(チェック結果・重要UC・PIVOT)を生成する
   status          status.md を生成し、要約を出す
   prd             表と質問から関係者向けの prd.html を生成する
-  mock            画面・UC・情報の属性から画面モック mock.html を生成する
 """
 import argparse
 import datetime
@@ -31,7 +29,7 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parent.parent
 
 TABLES = {
-    "00_ゴール.md": {"ゴール": ["ID", "ゴール", "達成の判断基準", "説明"]},
+    "00_ゴール.md": {"背景": ["背景"], "ゴール": ["ID", "ゴール", "達成の判断基準", "説明"]},
     "01_要求.md": {"要求": ["ID", "種別", "要求", "説明", "ゴールID"]},
     "02_アクター.md": {"アクター": ["アクター", "説明"], "外部システム": ["外部システム", "説明"]},
     "03_BUC.md": {"BUC": ["業務", "BUC", "要求ID", "先", "アクティビティ", "次", "アクター", "UC", "画面",
@@ -50,6 +48,8 @@ UNRESOLVED = {"未回答", "回答済"}
 SEVERITIES = ["致命", "警告", "情報"]
 ANY_VALUE = "すべて"  # 条件の表で、軸の値を問わないことを表す
 FLOW_DOWN = "↓"  # 03_BUC の次の列で、下の行のアクティビティへ進むことを表す
+REQ_TYPES = ["機能", "非機能", "ポリシー", "スコープ外"]  # 01_要求 の種別
+OUT_OF_SCOPE = "スコープ外"  # やらないと決めたこと。BUCからは参照しない
 
 
 # ---------------------------------------------------------------- 読み込み
@@ -99,7 +99,7 @@ def is_hyp(row):
     return row.get("出典", "") == "仮説"
 
 
-NAME_COLS = {"ゴール": ["ID"], "要求": ["ID"], "アクター": ["アクター"], "外部システム": ["外部システム"],
+NAME_COLS = {"ゴール": ["ID"], "背景": ["背景"], "要求": ["ID"], "アクター": ["アクター"], "外部システム": ["外部システム"],
              "BUC": ["BUC", "アクティビティ", "UC"], "情報": ["情報"], "情報関連": ["情報", "関連先"],
              "状態": ["状態モデル", "状態"], "条件": ["条件"], "バリエーション": ["バリエーション"],
              "条件の表": ["条件", "値"]}
@@ -342,8 +342,8 @@ def run_checks(m, qs, phase):
     for r in m.all_rows():
         src, qref = r.get("出典", ""), multi(r.get("質問", ""))
         target = row_label(r)
-        if not (src in ("要望", "回答", "仮説") or re.match(r"^資料:.+", src)):
-            add("S01", 0, "致命", target, f"出典が不正: {src!r}(要望/資料:<ファイル名>/回答/仮説)", r["_loc"])
+        if not (src in ("回答", "仮説") or re.match(r"^資料:.+", src)):
+            add("S01", 0, "致命", target, f"出典が不正: {src!r}(資料:<ファイル名>/回答/仮説)", r["_loc"])
         if src == "仮説" and not qref:
             add("S02", 0, "致命", target, "仮説の行に質問IDがない", r["_loc"])
         for qid in qref:
@@ -371,6 +371,12 @@ def run_checks(m, qs, phase):
             for v in multi(r[col]):
                 if v not in pool:
                     add(code, 0, "致命", f"BUC:{v}", f"{col}「{v}」が定義されていない", r["_loc"])
+        for q in multi(r["要求ID"]):
+            if m.reqs.get(q, {}).get("種別") == OUT_OF_SCOPE:
+                add("R06", 0, "致命", f"BUC:{q}", f"スコープ外の要求「{q}」をBUCから参照している", r["_loc"])
+    for q, r in m.reqs.items():
+        if r["種別"] not in REQ_TYPES:
+            add("S07", 0, "致命", q, f"要求の種別が不正: {r['種別']!r}({'/'.join(REQ_TYPES)})", r["_loc"])
     for g in m.groups():
         nodes, edges, issues = m.flow(g)
         for code, target, msg, loc in issues:
@@ -442,7 +448,7 @@ def run_checks(m, qs, phase):
 
     # フェーズ1
     if not m.goals:
-        add("P112", 1, "致命", "ゴール", "ゴールがない(最重要要求・背景から作る)", "00_ゴール.md")
+        add("P112", 1, "致命", "ゴール", "ゴールがない(資料にある一番実現したいことから作る)", "00_ゴール.md")
     goal_reqs = {g for r in m.t["要求"] for g in multi(r["ゴールID"])}
     for g, r in m.goals.items():
         if g not in goal_reqs:
@@ -470,7 +476,7 @@ def run_checks(m, qs, phase):
         if e not in used_exts:
             add("P104", 1, "警告", e, "外部システムがどのBUCにも登場しない", r["_loc"])
     for q, r in m.reqs.items():
-        if q not in used_reqs:
+        if q not in used_reqs and r["種別"] != OUT_OF_SCOPE:
             add("P105", 1, "警告", q, "要求がどのBUCにもつながっていない", r["_loc"])
     used_infos_any = {i for r in m.buc_rows for i in multi(r["情報"])}
     for i, r in m.infos.items():
@@ -602,17 +608,7 @@ HYP_STYLE = "classDef hyp stroke-dasharray:5 5,stroke:#d97706,color:#92400e"
 
 
 def system_name(d):
-    p = d / "初期要望.txt"
-    if p.exists():
-        lines = p.read_text(encoding="utf-8").splitlines()
-        for i, line in enumerate(lines):
-            if line.strip().startswith("# システム名"):
-                for nxt in lines[i + 1:]:
-                    if nxt.strip().startswith("#"):
-                        break
-                    if nxt.strip():
-                        return nxt.strip()
-    return "対象システム"
+    return load_state(d).get("system") or "対象システム"
 
 
 def mermaid(body):
@@ -650,6 +646,8 @@ def diagram_requirements(m):
         if is_hyp(r):
             hyps.append(n)
     for q, r in m.reqs.items():
+        if r["種別"] == OUT_OF_SCOPE:
+            continue
         n = ids("r", q)
         b.append(f"  {n}[{ql(f'{q} [{r['種別']}] {r['要求']}')}]")
         if is_hyp(r):
@@ -668,42 +666,6 @@ def diagram_requirements(m):
                     seen.add((q, buc))
                     arrow = "-.->" if is_hyp(r) else "-->"
                     b.append(f"  {ids('r', q)} {arrow} {bn}")
-    b.append("  " + HYP_STYLE)
-    if hyps:
-        b.append(f"  class {','.join(hyps)} hyp")
-    return mermaid(b)
-
-
-def diagram_business_context(m):
-    """業務の枠の中にBUCを置き、関わるアクター・外部システムとつなぐ。"""
-    ids = Ids()
-    b = ["flowchart LR"]
-    hyps, links = [], []
-    by_g = {}
-    for (g, buc), rows in m.bucs.items():
-        by_g.setdefault(g, []).append((buc, rows))
-    for g, bucs in by_g.items():
-        b.append(f"  subgraph {ids('g', g)}[{ql(g)}]")
-        for buc, rows in bucs:
-            bn = ids("b", buc)
-            b.append(f"    {bn}([{ql(buc)}])")
-            if rows and all(is_hyp(r) for r in rows):
-                hyps.append(bn)
-            for w, kind in [(a, "a") for r in rows for a in multi(r["アクター"])] + \
-                           [(e, "e") for r in rows for e in multi(r["外部システム"])]:
-                hyp = all(is_hyp(r) for r in rows
-                          if w in multi(r["アクター"]) + multi(r["外部システム"]))
-                link = (kind, w, bn, hyp)
-                if not any(l[:3] == link[:3] for l in links):
-                    links.append(link)
-        b.append("  end")
-    for kind, w, bn, hyp in links:
-        arrow = "-.-" if hyp else "---"
-        if kind == "a":
-            b.append(f"  {ids('a', w)}[{kl('アクター', w)}] {arrow} {bn}")
-        else:
-            b.append(f"  {bn} {arrow} {ids('e', w)}[[{kl('外部システム', w)}]]")
-    b += kind_classes(ids)
     b.append("  " + HYP_STYLE)
     if hyps:
         b.append(f"  class {','.join(hyps)} hyp")
@@ -914,34 +876,55 @@ def diagram_conditions(m):
 
 
 def build_diagrams(d):
+    """PRD と同じ章立て・同じ図で diagrams.md を作る。要求のつながりと条件の図は diagrams.md にだけある。"""
     m = Model(d)
-    out = ["# RDRA ダイアグラム", "",
+    out = [f"# {system_name(d)} ダイアグラム", "",
            "> `rdra.py diagrams` で表から生成。手で編集しない。点線・橙色は仮説。", ""]
-    out += ["## システムコンテキスト", "", diagram_context(m, system_name(d))]
+
+    def fig(md, caption=""):
+        return [md] + ([f"{caption}", ""] if caption else [])
+
+    bg = [r for r in m.t["背景"] if r["背景"]]
+    if bg or m.goals:
+        out += ["## 目的", ""]
+        hyp = lambda r: "(仮説)" if is_hyp(r) else ""
+        if bg:
+            out += ["### 背景", ""] + [f"- {r['背景']}{hyp(r)}" for r in bg] + [""]
+        if m.goals:
+            out += ["### ゴール", ""]
+            for g, r in m.goals.items():
+                out.append(f"- **{g}** {r['ゴール']}{hyp(r)}")
+                if r["達成の判断基準"]:
+                    out.append(f"  - 達成の判断基準: {r['達成の判断基準']}")
+            out.append("")
+    out += ["## システムコンテキスト", ""] + fig(diagram_context(m, system_name(d)), "システムと、使う人・つながる他のシステム")
     if m.goals or m.reqs:
-        out += ["## 要求モデル", "", diagram_requirements(m)]
+        out += ["## 要求", ""] + fig(diagram_requirements(m), "ゴール → 要求 → BUC のつながり")
     if m.bucs:
-        out += ["## ビジネスコンテキスト", "", diagram_business_context(m)]
         out += ["## 業務フロー", ""]
+        if len(m.groups()) > 1:
+            out += ["### ビジネスコンテキスト", ""] + fig(prd_business_flow(m), "業務と、関わるアクター・外部システム。点線は仮説のつながり")
         for g in m.groups():
-            out += [f"### {g}", ""]
-            out += [diagram_flow(m, g)] if m.flow(g)[0] else ["アクティビティがまだない。", ""]
-        out += ["## BUCごとのアクティビティ", ""]
-        for (g, buc), rows in m.bucs.items():
-            out += [f"### {g} / {buc}", ""]
-            out += [diagram_flow(m, g, buc)] if activities(rows) else ["アクティビティがまだない。", ""]
-    if m.ucs:
-        out += ["## UC複合図", ""]
-        for uc in m.ucs:
-            out += [f"### {uc}", "", diagram_uc(m, uc)]
+            out += [f"### {g}", "", "#### ビジネスユースケース", ""] + fig(prd_overall_flow(m, g), "BUCと、関わるアクター・外部システム。点線は仮説のつながり")
+            if m.flow(g)[0]:
+                out += ["#### 業務フロー", ""] + fig(diagram_flow(m, g, wrap=4), f"{g}の業務フロー。アクティビティを担当ごとの枠に置き、流れの順に矢印でつないだもの")
+            for (gg, buc), rows in m.bucs.items():
+                if gg != g:
+                    continue
+                out += [f"#### BUC - {buc}", ""]
+                out += [diagram_flow(m, g, buc, wrap=4)] if activities(rows) else ["アクティビティがまだない。", ""]
+                for uc in dict.fromkeys(r["UC"] for r in rows if r["UC"] in m.ucs):
+                    out += [f"##### UC: {uc}", "", diagram_uc(m, uc)]
     if m.infos:
-        out += ["## 情報モデル", "", diagram_info(m)]
+        out += ["## 情報", ""] + fig(prd_info_diagram(m), "矢印の文字は数の関係(例: 1対多 = 左の1つに右が複数)。点線は多対多")
     if m.state_models:
-        out += ["## 状態モデル", ""]
-        for sm in m.state_models:
-            out += [f"### {sm}", "", diagram_state(m, sm)]
+        out += ["## 状態遷移", ""]
+        for sm, rows in m.state_models.items():
+            out += [f"### {sm}", ""]
+            cap = "丸が状態、矢印の文字がその状態に移すUC" if any(r["遷移先"] for r in rows) else "どのUCでどの状態に移るかは、まだ決まっていない"
+            out += fig(diagram_state(m, sm, max_ucs=3), cap)
     if m.conds:
-        out += ["## バリエーション・条件", "", diagram_conditions(m)]
+        out += ["## 条件", "", diagram_conditions(m)]
     (d / "diagrams.md").write_text("\n".join(out), encoding="utf-8")
 
 
@@ -1014,7 +997,7 @@ def build_trace(m, phase):
                    "break": "" if roots else brk})
 
     for q, r in m.reqs.items():
-        if r["種別"] != "非機能":
+        if r["種別"] not in ("非機能", OUT_OF_SCOPE):
             add("要求", q, req_roots(q), "ゴールIDがない(ポリシー以外はゴールが要る)", r["_loc"])
     for (gyomu, buc), rows in m.bucs.items():
         add("BUC", buc, rows_roots(rows), rows_break(rows), rows[0]["_loc"])
@@ -1059,6 +1042,8 @@ def build_trace(m, phase):
                      "conds": list(dict.fromkeys(c for r in rows for c in multi(r["条件"])))})
     realize = []
     for q, r in m.reqs.items():
+        if r["種別"] == OUT_OF_SCOPE:
+            continue
         rows = [b for b in m.buc_rows if q in multi(b["要求ID"])]
         ucs = list(dict.fromkeys(b["UC"] for b in rows if b["UC"]))
         conds = list(dict.fromkeys(c for b in rows for c in multi(b["条件"])))
@@ -1153,10 +1138,8 @@ def build_status(d):
     next_gate = {0: None, 1: "1", 2: "2", 3: "done"}[phase]
     if next_gate:
         reasons = evaluate_gate(d, next_gate)
-    elif (d / DRAFT).exists():
-        reasons = [f"{DRAFT} を見直し、採用の指示をする(採用すると初期要望.txt になる)"]
     else:
-        reasons = ["初期要望.txt を書いて /rdra phase1(inputs/ に資料があれば /rdra draft で下書きを作れる)"]
+        reasons = ["議事録・資料を inputs/ に置いて /rdra phase1"]
     counts = {(p, s): 0 for p in PRIORITIES for s in Q_STATES}
     for q in qs.values():
         if (q["priority"], q_status(q)) in counts:
@@ -1270,7 +1253,6 @@ def table_file_content(fname):
     return "\n".join(out)
 
 
-# 後から足した列: (ファイル, 表, 列, この列の直前の列)
 def cmd_init(d):
     created = []
     d.mkdir(parents=True, exist_ok=True)
@@ -1278,16 +1260,24 @@ def cmd_init(d):
     keep = d / "inputs" / ".gitkeep"
     if not keep.exists():
         keep.write_text("", encoding="utf-8")
-    for src, dst in (("初期要望.txt", "初期要望.txt"), ("checklist-local.md", "checklist-local.md")):
+    for src, dst in (("checklist-local.md", "checklist-local.md"),):
         p = d / dst
         if not p.exists():
             p.write_text((SKILL_DIR / "templates" / src).read_text(encoding="utf-8"), encoding="utf-8")
             created.append(dst)
-    for fname in TABLES:
+    for fname, tdefs in TABLES.items():
         p = d / fname
         if not p.exists():
             p.write_text(table_file_content(fname), encoding="utf-8")
             created.append(fname)
+            continue
+        # 後から足した表は、既存のファイルの末尾に空で足す
+        parsed = parse_md_tables(p)
+        add = [f"## {t}\n\n| " + " | ".join(c + TAIL) + " |\n|" + "---|" * len(c + TAIL) + "\n"
+               for t, c in tdefs.items() if t not in parsed]
+        if add:
+            p.write_text(p.read_text(encoding="utf-8").rstrip("\n") + "\n\n" + "\n".join(add), encoding="utf-8")
+            created.append(f"{fname}(表を追加)")
     qp = d / "questions.md"
     if not qp.exists():
         qp.write_text("# 質問\n\n> 書式は .agents/skills/rdra/references/questions.md。回答は questions.html から。\n\n",
@@ -1299,117 +1289,14 @@ def cmd_init(d):
     return created
 
 
-# ---------------------------------------------------------------- 初期要望の点検と採用
-
-DRAFT = "初期要望.draft.txt"
-REQUEST_HEADINGS = ["システム名", "最重要要求", "背景", "業務の概要", "スコープ外", "その他"]
-REQUEST_REQUIRED = ["システム名", "最重要要求", "業務の概要"]
-MEMO_HEADING = "AIのメモ(採用時に消える)"
-SRC_MARK = re.compile(r"\s*［(?:資料|回答):[^］]*］")
-TODO_MARK = "【要記入】"
-
-
-def lint_request(d, name="初期要望.txt"):
-    """初期要望の形を機械的に点検する。[(重要度, 内容)] を返す。意味の判断はしない。"""
-    p = d / name
-    if not p.exists():
-        return [("致命", f"{name} がない")]
-    secs = initial_request_sections(d, name)
-    out = []
-    for h in REQUEST_HEADINGS:
-        if h not in secs:
-            out.append(("警告", f"見出し「# {h}」がない(テンプレートの見出しを変えない)"))
-    empty = [h for h in REQUEST_REQUIRED if not secs.get(h)]
-    if len(empty) == len(REQUEST_REQUIRED):
-        out.append(("致命", "システム名・最重要要求・業務の概要がすべて空"))
-    else:
-        out += [("警告", f"{h} が空(phase1 で優先度・高の質問になる)") for h in empty]
-    out += [("情報", f"{h} が空") for h in ("背景", "スコープ外") if not secs.get(h)]
-    if len(secs.get("最重要要求", [])) > 3:
-        out.append(("警告", f"最重要要求が {len(secs['最重要要求'])} 行ある(1〜3行に絞る)"))
-    parent, children = None, 0
-    for line in secs.get("業務の概要", []) + ["・"]:
-        t = line.strip()
-        if t.startswith("・"):
-            if parent and children == 0:
-                out.append(("警告", f"業務の概要「{parent}」の下に個々の業務(「-」の行)がない"))
-            parent, children = t.lstrip("・").strip(), 0
-        elif t.startswith("-"):
-            if parent is None:
-                out.append(("警告", f"業務の概要「{t}」の上に業務のまとまり(「・」の行)がない"))
-            children += 1
-        else:
-            out.append(("情報", f"業務の概要に「・」「-」で始まらない行がある: {t}"))
-    text = p.read_text(encoding="utf-8")
-    todos = [l.strip() for l in text.splitlines() if TODO_MARK in l]
-    if name == DRAFT:
-        out += [("情報", f"要記入: {t}") for t in todos]
-        out += [("警告", f"【要記入】に質問IDがない: {t}") for t in todos if not re.search(r"Q-\d+", t)]
-    elif SRC_MARK.search(text) or todos or MEMO_HEADING in secs:
-        out.append(("致命", "下書きの印(［資料:…］【要記入】AIのメモ)が残っている。rdra.py adopt で採用する"))
-    return out
-
-
-def request_written(d):
-    return any(initial_request_sections(d).get(h) for h in REQUEST_HEADINGS)
-
-
-def adopt_draft(d, replace=False):
-    """人が見直した初期要望.draft.txt を初期要望.txt にする。問題があれば理由のリストを返す。"""
-    p = d / DRAFT
-    if not p.exists():
-        return [f"{DRAFT} がない"]
-    lines = p.read_text(encoding="utf-8").splitlines()
-    todos = [l.strip() for l in lines if TODO_MARK in l]
-    if todos:
-        return [f"【要記入】が残っている(書くか、行を消す。空の項目は phase1 で質問になる): {t}" for t in todos]
-    qs, _ = parse_questions(d / "questions.md")
-    pending = [q["id"] for q in qs.values() if q["phase"] == 0 and q_status(q) == "回答済"]
-    if pending:
-        return [f"回答が下書きに反映されていない質問がある(先に /rdra draft で反映する): {', '.join(pending)}"]
-    if request_written(d) and not replace:
-        return ["初期要望.txt にすでに記述がある。下書きで置き換えてよいと人が確認したときだけ --replace を付ける"]
-    out, skip = [], False
-    for line in lines:
-        m = re.match(r"^#\s+(.+?)\s*$", line)
-        if m:
-            skip = m.group(1) == MEMO_HEADING
-        if not skip:
-            out.append(SRC_MARK.sub("", line).rstrip())
-    while out and not out[-1]:
-        out.pop()
-    (d / "初期要望.txt").write_text("\n".join(out) + "\n", encoding="utf-8")
-    p.unlink()
-    return []
-
-
 # ---------------------------------------------------------------- PRD(関係者向けHTML)
 
 # (01_要求 の種別, PRDの見出し, 何を入れるか)
 REQ_KIND = [("機能", "機能", "システムでできること。画面で入力する、計算する、表示するなど"),
             ("非機能", "非機能", "機能をどれだけ快適・安全に使えるか。速さ、使える端末、個人情報の守り方など"),
             ("ポリシー", "方針", "システムの作り方ではなく、事業・運営として決めること。"
-             "料金、だれ向けのサービスか、データをいつ消すか、制度改正への追従など")]
-
-
-def initial_request_sections(d, name="初期要望.txt"):
-    """初期要望.txt を {見出し: [本文の行]} で返す。テンプレートの案内行は除く。"""
-    p = d / name
-    secs = {}
-    if not p.exists():
-        return secs
-    cur = None
-    for line in p.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^#\s+(.+?)\s*$", line)
-        if m:
-            cur = m.group(1)
-            secs[cur] = []
-            continue
-        s = line.strip()
-        if cur is None or not s or re.fullmatch(r"[((].*[))]", s) or s in ("・", "-"):
-            continue
-        secs[cur].append(line.rstrip())
-    return secs
+             "料金、だれ向けのサービスか、データをいつ消すか、制度改正への追従など"),
+            (OUT_OF_SCOPE, "スコープ外", "このシステムでやらないと決めたこと")]
 
 
 def source_badge(src):
@@ -1418,8 +1305,6 @@ def source_badge(src):
         return '<span class="badge hyp" title="AIの提案。確認が必要">仮説・要確認</span>'
     if src == "回答":
         return '<span class="badge ok" title="質問への回答や人の編集で決まった">決定</span>'
-    if src == "要望":
-        return '<span class="badge src" title="初期要望に書かれている">初期要望</span>'
     if src.startswith("資料"):
         name = src.split(":", 1)[1] if ":" in src else ""
         return f'<span class="badge src" title="{e(name)}">資料</span>'
@@ -1435,17 +1320,6 @@ def plain_answer(q):
         note = a.split(" / 補足: ", 1)[1] if " / 補足: " in a else ""
         return q["fields"]["提案"] + (f"。補足: {note}" if note else "")
     return a.replace(" / 補足: ", "。補足: ")
-
-
-def screen_order(m):
-    """画面をBUCの行の順に並べる。PRDとモックで同じ番号(scr-N)を使う。"""
-    names = []
-    for rows in m.bucs.values():
-        for r in rows:
-            for s in multi(r["画面"]):
-                if s not in names:
-                    names.append(s)
-    return names
 
 
 def prd_figure(md, caption="", keys=None):
@@ -1612,7 +1486,6 @@ def build_prd(d):
     m = Model(d)
     qs, _ = parse_questions(d / "questions.md")
     sysname = system_name(d)
-    secs = initial_request_sections(d)
     now = datetime.datetime.now()
 
     def chips(values, cls="chip"):
@@ -1649,6 +1522,9 @@ def build_prd(d):
 
     # 1. 目的
     parts = []
+    bg = [r["背景"] for r in m.t["背景"] if r["背景"]]
+    if bg:
+        parts.append('<h3>背景</h3><ul class="bg">' + "".join(f"<li>{e(x)}</li>" for x in bg) + "</ul>")
     if m.goals:
         parts.append('<h3>ゴール</h3><ul class="reqs">' + "".join(
             f'<li><span class="rid">{e(g)}</span><div class="rbody"><div class="rtitle">{e(r["ゴール"])}'
@@ -1656,21 +1532,8 @@ def build_prd(d):
             + (f'<div class="rdesc">達成の判断基準: {e(r["達成の判断基準"])}</div>' if r["達成の判断基準"] else "")
             + (f'<div class="rdesc">{e(r["説明"])}</div>' if e(r["説明"]) else "")
             + "</div></li>" for g, r in m.goals.items()) + "</ul>")
-        parts.append("<h3>初期要望</h3>")
-    for key, label in [("最重要要求", "いちばん実現したいこと"), ("背景", "背景"), ("スコープ外", "やらないこと")]:
-        lines = secs.get(key, [])
-        if lines and lines != ["(未記入)"]:
-            paras = []  # 「- 」で始まる行は1項目、それ以外の続く行は1段落につなげる
-            for x in lines:
-                x = x.strip()
-                if x.startswith(("- ", "・")) or not paras:
-                    paras.append(x.lstrip("-・ ").strip())
-                else:
-                    paras[-1] += x
-            parts.append(f'<div class="quote"><div class="qlabel">{label}</div>'
-                         + "".join(f"<p>{e(x)}</p>" for x in paras) + "</div>")
     if parts:
-        section("purpose", "目的と背景", "".join(parts) + memo("purpose", "目的と背景"))
+        section("purpose", "目的", "".join(parts) + memo("purpose", "目的"))
 
     # 2. 使う人
     cards = []
@@ -1684,7 +1547,7 @@ def build_prd(d):
     html = prd_figure(diagram_context(m, sysname), "システムと、使う人・つながる他のシステム")
     html += f'<h3>アクター</h3><div class="cards">{"".join(cards) or "<p class=none>まだありません</p>"}</div>'
     html += f'<h3>外部システム</h3><div class="cards">{"".join(ext) or "<p class=none>今のところありません</p>"}</div>'
-    section("people", "アクターと外部システム", html + memo("people", "アクターと外部システム"))
+    section("people", "システムコンテキスト", html + memo("people", "システムコンテキスト"))
 
     # 3. 要求
     html = ""
@@ -1703,15 +1566,15 @@ def build_prd(d):
 
     # 4. 業務フロー
     multi_g = len({g for g, _ in m.bucs}) > 1
-    html = prd_figure(prd_business_flow(m), "業務と、関わるアクター・外部システム。点線は仮説のつながり") if multi_g else ""
+    html = ("<h3>ビジネスコンテキスト</h3>" + prd_figure(prd_business_flow(m), "業務と、関わるアクター・外部システム。点線は仮説のつながり")) if multi_g else ""
     by_g = {}
     for (g, buc), rows in m.bucs.items():
         by_g.setdefault(g, []).append((buc, rows))
     for g, bucs in by_g.items():
         html += f'<h3>{e(g)}</h3>'
-        html += prd_figure(prd_overall_flow(m, g), "BUCと、関わるアクター・外部システム。点線は仮説のつながり")
+        html += '<h4>ビジネスユースケース</h4>' + prd_figure(prd_overall_flow(m, g), "BUCと、関わるアクター・外部システム。点線は仮説のつながり")
         if m.flow(g)[0]:
-            html += prd_figure(diagram_flow(m, g, wrap=4), f"{g}の業務フロー。アクティビティを担当ごとの枠に置き、流れの順に矢印でつないだもの")
+            html += '<h4>業務フロー</h4>' + prd_figure(diagram_flow(m, g, wrap=4), f"{g}の業務フロー。アクティビティを担当ごとの枠に置き、流れの順に矢印でつないだもの")
         for buc, rows in bucs:
             steps = []
             for r in rows:
@@ -1756,7 +1619,7 @@ def build_prd(d):
                        f'{chips(s["who"], "chip who")}</div>{extra}</li>')
             key = f"buc-{buc}"
             fig = prd_figure(diagram_flow(m, g, buc, wrap=4)) if steps else ""
-            html += (f'<div class="flow"><div class="flow-h"><b>{e(buc)}</b>'
+            html += (f'<div class="flow"><div class="flow-h"><b>BUC - {e(buc)}</b>'
                      f'<span class="sub">{chips(reqids, "chip req")}</span></div>{fig}'
                      f'<details class="more"><summary>アクティビティごとの詳細</summary>'
                      f'<ol class="steps">{li or "<li class=none>まだアクティビティがありません</li>"}</ol></details>{memo(key, buc)}</div>')
@@ -1864,6 +1727,8 @@ def build_prd(d):
     header = (f'<header class="top"><div class="eyebrow">要件定義書(PRD)</div>'
               f'<h1>{e(sysname)}</h1><div class="meta">{now.year}年{now.month}月{now.day}日 {now:%H:%M} 時点</div>{stats}'
               '<details class="guide"><summary>この資料の読み方</summary><dl>'
+              '<dt>システムコンテキスト</dt><dd>システムを使う人(アクター)と、つながる他のシステム(外部システム)</dd>'
+              '<dt>ビジネスコンテキスト</dt><dd>業務と、それぞれに関わるアクター・外部システムの全体像</dd>'
               '<dt>BUC(ビジネスユースケース)</dt><dd>一連の仕事の流れ(例: 利用を始める)。アクティビティを順番に並べたもの</dd>'
               '<dt>アクティビティ</dt><dd>BUCの中の一つひとつの作業</dd>'
               '<dt>UC(ユースケース)</dt><dd>アクティビティの中で、システムを使う部分</dd>'
@@ -1880,209 +1745,6 @@ def build_prd(d):
                         + json.dumps(details, ensure_ascii=False).replace("</", "<\\/") + "</script>"))
     (d / "prd.html").write_text(out, encoding="utf-8")
     return len(open_qs)
-
-
-# ---------------------------------------------------------------- 画面モック(ワイヤーフレーム)
-
-SYSTEM_SET = re.compile(r"(ID|状態|日時|登録日)$")
-UNIT_RULES = [(re.compile(r"(生年月日|開始日|日)$"), "date", ""), (re.compile(r"年齢$"), "number", "歳"),
-              (re.compile(r"(率|利回り|金利)$"), "number", "%"), (re.compile(r"(期間)$"), "number", "年"),
-              (re.compile(r"(年)$"), "number", "年"),
-              (re.compile(r"(額|金|価格|家賃|頭金|保険料|残高|教育費)$"), "number", "円")]
-SELECT_RULE = re.compile(r"(種類|区分|形態|続柄|性別|費目|進路|方法|か)$")
-
-
-def split_attr(attr):
-    """「種類(預貯金・NISA・iDeCo・DCなど)」→ ("種類", ["預貯金", "NISA", "iDeCo", "DC"])"""
-    m = re.match(r"^(.+?)[((](.+)[))]$", attr)
-    if not m:
-        return attr, []
-    opts = [o.replace("など", "").strip() for o in re.split(r"[・/]", m.group(2)) if "〜" not in o]
-    return m.group(1), [o for o in opts if o]
-
-
-def uc_verb(uc):
-    return uc.split("を", 1)[1] if "を" in uc else uc
-
-
-def build_mock(d):
-    from html import escape as e
-    m = Model(d)
-    qs, _ = parse_questions(d / "questions.md")
-    sysname = system_name(d)
-    many = {r["関連先"] for r in m.t["情報関連"] if r["多重度"] == "1対多"}
-    many |= {r["情報"] for r in m.t["情報関連"] if r["多重度"] == "多対1"}
-    many |= {x for r in m.t["情報関連"] if r["多重度"] == "多対多" for x in (r["情報"], r["関連先"])}
-
-    # 画面 → 行(BUCの順)
-    screens = {}
-    for (g, buc), rows in m.bucs.items():
-        for r in rows:
-            for s in multi(r["画面"]):
-                sc = screens.setdefault(s, {"g": g, "buc": buc, "rows": []})
-                sc["rows"].append(r)
-    if not screens:
-        (d / "mock.html").write_text("<!doctype html><meta charset='utf-8'><title>画面モック</title>"
-                                     "<p>画面がまだありません。フェーズ2で画面を洗い出すと作れます。</p>", encoding="utf-8")
-        return 0
-
-    def fields(info, ext):
-        """情報の属性から入力欄を作る。IDや状態などシステムが決める項目は出さない。"""
-        r = m.infos.get(info)
-        out = []
-        for a in multi(r["属性"]) if r else []:
-            label, opts = split_attr(a)
-            if label.startswith("年ごとの"):
-                continue
-            ref = label[:-2] if label.endswith("ID") else ""
-            if ref and ref in m.infos and ref not in ("シミュレーション", "世帯", "相談者") and ref != info:
-                out.append(f'<label class="f"><span>対象の{e(ref)}</span><select disabled><option>選ぶ</option></select></label>')
-                continue
-            if SYSTEM_SET.search(label):
-                continue
-            if ext:
-                out.append(f'<label class="f"><span>{e(label)}</span><input disabled placeholder="{e(ext)}から取得"></label>')
-                continue
-            if opts or SELECT_RULE.search(label):
-                if opts and len(opts) <= 3:
-                    out.append(f'<div class="f"><span>{e(label)}</span><div class="seg">'
-                               + "".join(f'<b class="{"on" if i == 0 else ""}">{e(o)}</b>' for i, o in enumerate(opts)) + "</div></div>")
-                else:
-                    o = "".join(f"<option>{e(x)}</option>" for x in opts) or "<option>選ぶ</option>"
-                    out.append(f'<label class="f"><span>{e(label)}</span><select disabled>{o}</select></label>')
-                continue
-            kind, unit = "text", ""
-            for rx, k, u in UNIT_RULES:
-                if rx.search(label):
-                    kind, unit = k, u
-                    break
-            inp = '<input disabled placeholder="年/月/日">' if kind == "date" else '<input disabled>'
-            out.append(f'<label class="f"><span>{e(label)}</span><span class="in">{inp}{f"<em>{unit}</em>" if unit else ""}</span></label>')
-        return out
-
-    def cf_columns(info):
-        r = m.infos.get(info)
-        for a in multi(r["属性"]) if r else []:
-            if a.startswith("年ごとの"):
-                return ["年"] + [c for c in a[len("年ごとの"):].split("・") if c]
-        return []
-
-    def table(cols, n=4, cls=""):
-        head = "".join(f"<th>{e(c)}</th>" for c in cols)
-        body = "".join("<tr>" + "".join("<td><i></i></td>" for _ in cols) + "</tr>" for _ in range(n))
-        return f'<div class="tw"><table class="{cls}"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
-
-    def render_ucs(rows):
-        parts, list_actions = [], {}
-        for r in rows:
-            uc = r["UC"]
-            if not uc:
-                continue
-            infos = multi(r["情報"])
-            main = infos[0] if infos else ""
-            ext = (multi(r["外部システム"]) or [""])[0]
-            verb = uc_verb(uc)
-            if len(multi(r["画面"])) >= 3:
-                # 多くの画面にまたがるUCは、同じ入力画面を複製せず、各画面の上で編集する対象を切り替える
-                parts.insert(0, f'<div class="block row"><span class="hint">編集する対象</span><div class="seg">'
-                                f'<b class="on">現状</b><b>{e(main)}を選ぶ</b></div></div>'
-                                f'<p class="hint">{e(main)}を選ぶと、この画面で変えた項目だけが{e(main)}に保存されます({e(uc)})</p>')
-                continue
-            if verb.startswith("認証"):
-                parts.append(f'<div class="block center"><p class="hint">{e(ext + "アカウントでログインします" if ext else "")}</p>'
-                             f'<button class="btn primary">{e(ext + "でログイン" if ext else "ログイン")}</button></div>')
-            elif verb.startswith(("複製", "削除")) or verb.endswith("反映する"):
-                list_actions.setdefault(main, []).append(verb.replace("する", ""))
-            elif verb.startswith("試算"):
-                parts.append(f'<div class="block row"><span class="hint">入力が終わったら試算します</span><button class="btn primary">{e(verb)}</button></div>')
-            elif verb.startswith("表示"):
-                cols = cf_columns(main)
-                parts.append(f'<div class="block"><div class="chart"><span>グラフ: {e("・".join(cols[1:]) or main)}の推移</span>'
-                             f'<svg viewBox="0 0 300 80" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,60 50,52 100,55 150,40 200,35 250,22 300,18" /></svg></div>'
-                             + (table(cols, 5, "cf") if cols else "") + "</div>")
-            elif verb.startswith("比較"):
-                cols = cf_columns(main)
-                pick = "".join(f'<label class="f"><span>{e(main)}{i}</span><select disabled><option>選ぶ</option></select></label>' for i in ("A", "B"))
-                cmp_cols = ["年"] + [f"{c}({x})" for c in cols[-1:] for x in ("A", "B")] if cols else []
-                parts.append(f'<div class="block"><div class="grid2">{pick}</div><div class="chart"><span>グラフ: A と B の{e(cols[-1] if cols else main)}を重ねて表示</span>'
-                             f'<svg viewBox="0 0 300 80" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,60 75,50 150,42 225,30 300,20" /><polyline class="b" points="0,60 75,56 150,52 225,48 300,44" /></svg></div>'
-                             + (table(cmp_cols, 4) if cmp_cols else "") + "</div>")
-            elif verb.startswith("退会"):
-                targets = "、".join(infos)
-                parts.append(f'<div class="block"><p class="warn">退会すると、{e(targets)}のデータが削除されます。元に戻せません。</p>'
-                             f'<button class="btn danger">{e(verb.replace("させる", "する"))}</button></div>')
-            else:
-                fs = fields(main, ext)
-                is_list = main in many and not verb.startswith("作成")
-                title = f'<div class="bh"><b>{e(main)}</b><span class="uc">{e(uc)}</span></div>'
-                if not fs:
-                    parts.append(f'<p class="hint">{e(main)}は入力する項目がなく、自動で作られます({e(uc)})</p>')
-                    continue
-                if is_list:
-                    labels = [re.sub(r"<[^>]+>", "", f.split("</span>")[0]) for f in fs]
-                    body = (table(labels, 2) + f'<button class="btn ghost">+ {e(main)}を追加</button>'
-                            f'<details class="edit"><summary>追加・編集の入力欄</summary><div class="form">{"".join(fs)}</div></details>')
-                else:
-                    body = f'<div class="form">{"".join(fs)}</div>'
-                btn = f'<button class="btn primary">{e(ext + "で" + verb if ext else verb)}</button>'
-                parts.append(f'<div class="block">{title}{body}<div class="acts">{btn}</div></div>')
-        for main, acts in list_actions.items():
-            r = m.infos.get(main)
-            cols = [split_attr(a)[0] for a in multi(r["属性"]) if r and (a.startswith(("名前", "状態")) or a.endswith("日時"))] or [main]
-            head = "".join(f"<th>{e(c)}</th>" for c in cols) + "<th></th>"
-            btns = "".join(f'<button class="btn mini {"danger" if a.startswith("削除") else ""}">{e(a)}</button>' for a in acts)
-            body = "".join("<tr>" + "".join("<td><i></i></td>" for _ in cols) + f"<td class='ra'>{btns}</td></tr>" for _ in range(3))
-            parts.insert(0, f'<div class="block"><div class="bh"><b>{e(main)}の一覧</b></div><div class="tw"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div></div>')
-        return "".join(parts)
-
-    nav, views = [], []
-    names = screen_order(m)
-    by_buc = {}
-    for s in names:
-        by_buc.setdefault(screens[s]["buc"], []).append(s)
-    cur_g = None
-    for idx, s in enumerate(names):
-        sc = screens[s]
-        rows = sc["rows"]
-        actors = sorted({a for r in rows for a in multi(r["アクター"])})
-        admin = any(a == "運営者" for a in actors) or "管理" in s
-        if sc["g"] != cur_g:
-            cur_g = sc["g"]
-            nav.append(f'<div class="ng">{e(cur_g)}</div>')
-        hyp = any(is_hyp(r) for r in rows)
-        nav.append(f'<a href="#scr-{idx}" data-i="{idx}">{e(s)}{"<sup>仮</sup>" if hyp else ""}</a>')
-        sib = by_buc[sc["buc"]]
-        steps = ""
-        if len(sib) > 2:
-            steps = '<div class="steps">' + "".join(
-                f'<a href="#scr-{names.index(x)}" class="{"on" if x == s else ""}">{e(x.replace("入力画面", "").replace("画面", ""))}</a>' for x in sib) + "</div>"
-        app = (f'<div class="app {"admin" if admin else ""}"><div class="bar"><b>{e(sysname)}{" 管理" if admin else ""}</b>'
-               f'<span>{"運営者" if admin else "相談者"}</span></div>{steps}<div class="page"><h3>{e(s.replace("画面", ""))}</h3>{render_ucs(rows)}</div></div>')
-        notes = ""
-        for r in rows:
-            if not r["UC"]:
-                continue
-            notes += (f'<li><b>{e(r["UC"])}</b>{source_badge(r["出典"])}{"".join(f"<span class=qref>{e(q)}</span>" for q in multi(r["質問"]))}'
-                      f'<div class="sub">アクティビティ: {e(r["アクティビティ"])} / 情報: {e("、".join(multi(r["情報"])))}'
-                      + (f' / 連携: {e(r["イベント"])}({e(r["外部システム"])})' if r["イベント"] else "") + "</div></li>")
-        views.append(
-            f'<section class="view" id="scr-{idx}" data-i="{idx}"><div class="vh"><div><div class="crumb">{e(sc["g"])} / {e(sc["buc"])}</div>'
-            f'<h2>{e(s)}</h2><div class="sub">使う人: {e("、".join(actors))}</div></div></div>'
-            f'<div class="stage"><div class="device">{app}</div></div>'
-            f'<aside class="notes"><h4>この画面でできること</h4><ul>{notes}</ul>'
-            f'<div class="memo"><label for="memo-{idx}">メモ</label><textarea id="memo-{idx}" data-key="{e(s)}" data-label="{e(s)}" rows="2" placeholder="足りない項目、分かりにくい点など"></textarea></div></aside></section>')
-
-    open_n = sum(1 for q in qs.values() if q_status(q) in UNRESOLVED)
-    tmpl = (SKILL_DIR / "templates" / "mock.html.tmpl").read_text(encoding="utf-8")
-    now = datetime.datetime.now()
-    out = (tmpl.replace("__TITLE__", e(f"{sysname} 画面モック"))
-               .replace("__SYSTEM__", e(sysname))
-               .replace("__STORE__", e(f"rdra-mock:{sysname}"))
-               .replace("__META__", e(f"{now.year}年{now.month}月{now.day}日 {now:%H:%M} 時点・画面 {len(names)}・未解決の質問 {open_n}"))
-               .replace("<!--__NAV__-->", "".join(nav))
-               .replace("<!--__VIEWS__-->", "".join(views)))
-    (d / "mock.html").write_text(out, encoding="utf-8")
-    return len(names)
 
 
 # ---------------------------------------------------------------- main
@@ -2108,11 +1770,9 @@ def main():
     p.add_argument("--force", metavar="理由")
     p = sub.add_parser("trace")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("lint-request")
-    p.add_argument("--draft", action="store_true")
-    p = sub.add_parser("adopt")
-    p.add_argument("--replace", action="store_true")
-    for name in ("next-qid", "html", "merge-answers", "diagrams", "analysis", "status", "prd", "mock"):
+    p = sub.add_parser("set-name")
+    p.add_argument("name")
+    for name in ("next-qid", "html", "merge-answers", "diagrams", "analysis", "status", "prd"):
         sub.add_parser(name)
     args = ap.parse_args()
     d = Path(args.dir)
@@ -2198,22 +1858,11 @@ def main():
         save_state(d, st)
         print(f"許容: {args.key}")
         return 0
-    if args.cmd == "lint-request":
-        issues = lint_request(d, DRAFT if args.draft else "初期要望.txt")
-        for sev, msg in issues:
-            print(f"[{sev}] {msg}")
-        print(f"計 {len(issues)} 件")
-        return 1 if any(sev == "致命" for sev, _ in issues) else 0
-    if args.cmd == "adopt":
-        reasons = adopt_draft(d, args.replace)
-        if reasons:
-            print("採用できない:")
-            for r in reasons:
-                print(f"- {r}")
-            return 1
-        print(f"{DRAFT} を初期要望.txt として採用(下書きは削除)")
-        for sev, msg in lint_request(d):
-            print(f"[{sev}] {msg}")
+    if args.cmd == "set-name":
+        st = load_state(d)
+        st["system"] = args.name
+        save_state(d, st)
+        print(f"システム名を「{args.name}」に設定")
         return 0
     if args.cmd == "next-qid":
         qs, _ = parse_questions(d / "questions.md")
@@ -2234,9 +1883,6 @@ def main():
     if args.cmd == "diagrams":
         build_diagrams(d)
         print("diagrams.md を生成")
-        return 0
-    if args.cmd == "mock":
-        print(f"mock.html を生成(画面 {build_mock(d)})")
         return 0
     if args.cmd == "prd":
         n = build_prd(d)
