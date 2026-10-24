@@ -129,7 +129,7 @@ function setAnswer(id, patch) {
   if (card) card.classList.toggle("answered", hasAnswer(id));
 }
 
-const phaseLabel = ph => ph === 0 ? "初期要望" : "フェーズ" + ph;
+const phaseLabel = ph => ph === "計画" ? "計画" : ph === 0 ? "初期要望" : "フェーズ" + ph;
 
 function renderFilters() {
   const f = document.getElementById("filters");

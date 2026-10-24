@@ -29,7 +29,11 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parent.parent
 
 TABLES = {
-    "00_ゴール.md": {"背景": ["背景"], "ゴール": ["ID", "ゴール", "達成の判断基準", "説明"]},
+    "00_ゴール.md": {"背景": ["背景"], "ゴール": ["ID", "ゴール", "達成の判断基準", "説明"],
+                   "スコープ": ["ID", "区分", "内容", "理由"],
+                   "完了の定義": ["ID", "完了条件", "確認方法"],
+                   "マイルストーン": ["ID", "マイルストーン", "時期", "内容"],
+                   "リスク": ["ID", "リスク", "影響", "対応方針", "対策"]},
     "01_要求.md": {"要求": ["ID", "種別", "要求", "説明", "ゴールID"]},
     "02_アクター.md": {"アクター": ["アクター", "説明"], "外部システム": ["外部システム", "説明"]},
     "03_BUC.md": {"BUC": ["業務", "BUC", "要求ID", "先", "アクティビティ", "次", "アクター", "UC", "画面",
@@ -48,8 +52,13 @@ UNRESOLVED = {"未回答", "回答済"}
 SEVERITIES = ["致命", "警告", "情報"]
 ANY_VALUE = "すべて"  # 条件の表で、軸の値を問わないことを表す
 FLOW_DOWN = "↓"  # 03_BUC の次の列で、下の行のアクティビティへ進むことを表す
-REQ_TYPES = ["機能", "非機能", "ポリシー", "スコープ外"]  # 01_要求 の種別
-OUT_OF_SCOPE = "スコープ外"  # やらないと決めたこと。BUCからは参照しない
+REQ_TYPES = ["機能", "非機能", "ポリシー", "対象外"]  # 01_要求 の種別
+OUT_OF_SCOPE = "対象外"  # 議論の結果、やらないと決めた要求。BUCからは参照しない
+SCOPE_KINDS = ["対象", "対象外"]  # 00_ゴール のスコープの区分(システムが扱う範囲の線引き)
+RISK_RESPONSES = ["回避", "転嫁", "軽減", "受容", "エスカレーション"]  # リスクの対応方針(PMBOKの脅威への対応戦略)
+# プロジェクト計画の表。表示とチェックはするが、フェーズの判定・完成の判定には使わない
+PLAN_TABLES = ["スコープ", "完了の定義", "マイルストーン", "リスク"]
+PLAN_Q = "計画"  # 計画についての質問の見出しに [計画] と書く。判定には使わない
 
 
 # ---------------------------------------------------------------- 読み込み
@@ -99,7 +108,8 @@ def is_hyp(row):
     return row.get("出典", "") == "仮説"
 
 
-NAME_COLS = {"ゴール": ["ID"], "背景": ["背景"], "要求": ["ID"], "アクター": ["アクター"], "外部システム": ["外部システム"],
+NAME_COLS = {"ゴール": ["ID"], "背景": ["背景"], "スコープ": ["ID"], "完了の定義": ["ID"], "マイルストーン": ["ID"],
+             "リスク": ["ID"], "要求": ["ID"], "アクター": ["アクター"], "外部システム": ["外部システム"],
              "BUC": ["BUC", "アクティビティ", "UC"], "情報": ["情報"], "情報関連": ["情報", "関連先"],
              "状態": ["状態モデル", "状態"], "条件": ["条件"], "バリエーション": ["バリエーション"],
              "条件の表": ["条件", "値"]}
@@ -251,7 +261,7 @@ class Model:
                        for r in rows if uc in multi(r["遷移UC"])})
 
 
-Q_HEAD = re.compile(r"^###\s+(Q-\d+)\s+\[(.+?)\]\s+\[フェーズ(\d)\]\s*(.*)$")
+Q_HEAD = re.compile(r"^###\s+(Q-\d+)\s+\[(.+?)\]\s+\[(?:フェーズ(\d)|(計画))\]\s*(.*)$")
 Q_FIELD = re.compile(r"^(対象|提案|根拠|観点|回答|状態):\s?(.*)$")
 Q_CHOICE = re.compile(r"^\s+([A-Z])\)\s*(.*)$")
 
@@ -265,8 +275,8 @@ def parse_questions(path):
     for idx, line in enumerate(lines):
         m = Q_HEAD.match(line)
         if m:
-            cur = {"id": m.group(1), "priority": m.group(2), "phase": int(m.group(3)),
-                   "title": m.group(4).strip(), "fields": {}, "lines": {}, "choices": [],
+            cur = {"id": m.group(1), "priority": m.group(2), "phase": int(m.group(3)) if m.group(3) else PLAN_Q,
+                   "title": m.group(5).strip(), "fields": {}, "lines": {}, "choices": [],
                    "head_line": idx}
             qs[cur["id"]] = cur
             continue
@@ -288,6 +298,10 @@ def parse_questions(path):
 
 def q_status(q):
     return q["fields"].get("状態", "")
+
+
+def is_plan_q(q):
+    return q["phase"] == PLAN_Q
 
 
 # ---------------------------------------------------------------- 状態ファイル
@@ -313,6 +327,11 @@ class Issue:
     @property
     def key(self):
         return f"{self.code}:{self.target}"
+
+    @property
+    def plan(self):
+        """計画の表についての指摘か。判定には使わない。"""
+        return re.split(r"[:#]", self.target)[-1 if "#" in self.target else 0] in PLAN_TABLES
 
     def to_dict(self):
         return {"key": self.key, "code": self.code, "phase": self.phase, "severity": self.severity,
@@ -353,7 +372,8 @@ def run_checks(m, qs, phase):
             add("S04", 0, "警告", target, "質問は解決済みだが行が仮説のまま(反映漏れ)", r["_loc"])
 
     # 重複
-    for tname, col in (("ゴール", "ID"), ("要求", "ID"), ("アクター", "アクター"), ("外部システム", "外部システム"),
+    for tname, col in (("ゴール", "ID"), *((t, "ID") for t in PLAN_TABLES), ("要求", "ID"),
+                       ("アクター", "アクター"), ("外部システム", "外部システム"),
                        ("情報", "情報"), ("条件", "条件"), ("バリエーション", "バリエーション")):
         seen = set()
         for r in m.t[tname]:
@@ -373,10 +393,16 @@ def run_checks(m, qs, phase):
                     add(code, 0, "致命", f"BUC:{v}", f"{col}「{v}」が定義されていない", r["_loc"])
         for q in multi(r["要求ID"]):
             if m.reqs.get(q, {}).get("種別") == OUT_OF_SCOPE:
-                add("R06", 0, "致命", f"BUC:{q}", f"スコープ外の要求「{q}」をBUCから参照している", r["_loc"])
+                add("R06", 0, "致命", f"BUC:{q}", f"対象外の要求「{q}」をBUCから参照している", r["_loc"])
     for q, r in m.reqs.items():
         if r["種別"] not in REQ_TYPES:
             add("S07", 0, "致命", q, f"要求の種別が不正: {r['種別']!r}({'/'.join(REQ_TYPES)})", r["_loc"])
+    for r in m.t["スコープ"]:
+        if r["区分"] not in SCOPE_KINDS:
+            add("S10", 0, "致命", row_label(r), f"スコープの区分が不正: {r['区分']!r}({'/'.join(SCOPE_KINDS)})", r["_loc"])
+    for r in m.t["リスク"]:
+        if r["対応方針"] and r["対応方針"] not in RISK_RESPONSES:
+            add("S11", 0, "致命", row_label(r), f"リスクの対応方針が不正: {r['対応方針']!r}({'/'.join(RISK_RESPONSES)})", r["_loc"])
     for g in m.groups():
         nodes, edges, issues = m.flow(g)
         for code, target, msg, loc in issues:
@@ -447,6 +473,9 @@ def run_checks(m, qs, phase):
                 f"組合せが抜けている: {' / '.join('、'.join(x) for x in missing[:3])}{more}", rows[0]["_loc"])
 
     # フェーズ1
+    for tname in PLAN_TABLES:
+        if not any(r["ID"] for r in m.t[tname]):
+            add("P114", 1, "情報", tname, f"{tname}がまだない", "00_ゴール.md")
     if not m.goals:
         add("P112", 1, "致命", "ゴール", "ゴールがない(資料にある一番実現したいことから作る)", "00_ゴール.md")
     goal_reqs = {g for r in m.t["要求"] for g in multi(r["ゴールID"])}
@@ -556,7 +585,9 @@ def evaluate_gate(d, gate):
     m = Model(d)
     qs, _ = parse_questions(d / "questions.md")
     phase = st["phase"]
-    issues = [i for i in run_checks(m, qs, phase) if i.key not in st["accepted"]]
+    # 計画の表・計画の質問は判定に使わない
+    issues = [i for i in run_checks(m, qs, phase) if i.key not in st["accepted"] and not i.plan]
+    qs = {k: q for k, q in qs.items() if not is_plan_q(q)}
     reasons = []
     if gate in ("1", "2"):
         need = int(gate)
@@ -576,7 +607,7 @@ def evaluate_gate(d, gate):
             reasons.append(f"優先度・高・中の未解決: {', '.join(q['id'] for q in hm)}")
         hyp = {}
         for r in m.all_rows():
-            if is_hyp(r):
+            if is_hyp(r) and r["_table"] not in PLAN_TABLES:
                 hyp.setdefault(TABLE_FILE[r["_table"]], []).append(r["_loc"].rsplit(":", 1)[1])
         if hyp:
             reasons.append("仮説の行が残っている: " + "、".join(
@@ -611,8 +642,13 @@ def system_name(d):
     return load_state(d).get("system") or "対象システム"
 
 
+# Mermaid 11 以降は既定の配置が変わり、業務フローの担当の枠がばらけて流れが上に戻る。
+# 配置を dagre に固定して、PRD(Mermaid 10)と Markdown のプレビュー(新しい Mermaid)で同じ形にする
+MERMAID_HEAD = ["---", "config:", "  layout: dagre", "---"]
+
+
 def mermaid(body):
-    return "```mermaid\n" + "\n".join(body) + "\n```\n"
+    return "```mermaid\n" + "\n".join(MERMAID_HEAD + body) + "\n```\n"
 
 
 def diagram_context(m, sysname):
@@ -630,42 +666,6 @@ def diagram_context(m, sysname):
         if is_hyp(r):
             hyps.append(n)
     b += kind_classes(ids)
-    b.append("  " + HYP_STYLE)
-    if hyps:
-        b.append(f"  class {','.join(hyps)} hyp")
-    return mermaid(b)
-
-
-def diagram_requirements(m):
-    ids = Ids()
-    b = ["flowchart LR"]
-    hyps = []
-    for g, r in m.goals.items():
-        n = ids("g", g)
-        b.append(f"  {n}{{{{{ql(f'{g} {r['ゴール']}')}}}}}")
-        if is_hyp(r):
-            hyps.append(n)
-    for q, r in m.reqs.items():
-        if r["種別"] == OUT_OF_SCOPE:
-            continue
-        n = ids("r", q)
-        b.append(f"  {n}[{ql(f'{q} [{r['種別']}] {r['要求']}')}]")
-        if is_hyp(r):
-            hyps.append(n)
-        for g in multi(r["ゴールID"]):
-            if g in m.goals:
-                arrow = "-.->" if is_hyp(r) else "-->"
-                b.append(f"  {ids('g', g)} {arrow} {n}")
-    seen = set()
-    for (g, buc), rows in m.bucs.items():
-        bn = ids("b", buc)
-        b.append(f"  {bn}([{ql(buc)}])")
-        for r in rows:
-            for q in multi(r["要求ID"]):
-                if q in m.reqs and (q, buc) not in seen:
-                    seen.add((q, buc))
-                    arrow = "-.->" if is_hyp(r) else "-->"
-                    b.append(f"  {ids('r', q)} {arrow} {bn}")
     b.append("  " + HYP_STYLE)
     if hyps:
         b.append(f"  class {','.join(hyps)} hyp")
@@ -750,32 +750,42 @@ def kind_classes(ids):
 
 
 def diagram_uc(m, uc, ids=None):
+    """UC複合図。ロバストネス図にならい、画面・イベントを「バウンダリ」、UCを「コントローラ」、
+    情報・状態モデルを「エンティティ」の枠に置く。アクター・外部システム・条件は枠の外に置く。"""
     ids = ids or Ids()
     un = ids("uc", uc)
-    b = ["flowchart LR", f"  {un}([{kl('UC', uc)}])"]
-    seen = set()
+    boundary, entity, outside, edges = [], [], [], []
+
+    def node(lst, line):
+        if line not in lst:
+            lst.append(line)
 
     def edge(line):
-        if line not in seen:
-            seen.add(line)
-            b.append(line)
+        if line not in edges:
+            edges.append(line)
 
     for r in m.ucs[uc]:
         arrow = "-.-" if is_hyp(r) else "---"
-        for s in multi(r["画面"]):
-            sn = ids("s", s)
-            edge(f"  {sn}[/{kl('画面', s)}/] {arrow} {un}")
+        for sc in multi(r["画面"]):
+            sn = ids("s", sc)
+            node(boundary, f"    {sn}[/{kl('画面', sc)}/]")
+            edge(f"  {sn} {arrow} {un}")
             for a in multi(r["アクター"]):
-                edge(f"  {ids('a', a)}[{kl('アクター', a)}] {arrow} {sn}")
+                node(outside, f"  {ids('a', a)}[{kl('アクター', a)}]")
+                edge(f"  {ids('a', a)} {arrow} {sn}")
         for ev in multi(r["イベント"]):
             en = ids("ev", ev)
-            edge(f"  {un} {arrow} {en}>{kl('イベント', ev)}]")
+            node(boundary, f"    {en}>{kl('イベント', ev)}]")
+            edge(f"  {un} {arrow} {en}")
             for e in multi(r["外部システム"]):
-                edge(f"  {en} {arrow} {ids('e', e)}[[{kl('外部システム', e)}]]")
+                node(outside, f"  {ids('e', e)}[[{kl('外部システム', e)}]]")
+                edge(f"  {en} {arrow} {ids('e', e)}")
         for i in multi(r["情報"]):
-            edge(f"  {un} {arrow} {ids('i', i)}[({kl('情報', i)})]")
+            node(entity, f"    {ids('i', i)}[({kl('情報', i)})]")
+            edge(f"  {un} {arrow} {ids('i', i)}")
         for c in multi(r["条件"]):
-            edge(f"  {ids('c', c)}{{{kl('条件', c)}}} {arrow} {un}")
+            node(outside, f"  {ids('c', c)}{{{kl('条件', c)}}}")
+            edge(f"  {ids('c', c)} {arrow} {un}")
     # 状態モデルは持ち主の情報にだけつなぎ、線にはこのUCで起きる遷移を書く。
     # 持ち主の情報をUCが扱っていなければ描かない(P209 で指摘する)
     for sm in m.uc_state_models(uc):
@@ -783,12 +793,17 @@ def diagram_uc(m, uc, ids=None):
         if not holders:
             continue
         sn = ids("sm", sm)
+        node(entity, f"    {sn}[{kl('状態モデル', sm)}]")
         trans = "、".join(dict.fromkeys(f"{r['状態']}→{t}" for r in m.state_models[sm]
                                         if uc in multi(r["遷移UC"]) for t in multi(r["遷移先"])))
         for i in holders:
             link = f"-->|{ql(trans)}|" if trans else "-->"
-            edge(f"  {ids('i', i)} {link} {sn}[{kl('状態モデル', sm)}]")
-    b += kind_classes(ids)
+            edge(f"  {ids('i', i)} {link} {sn}")
+    b = ["flowchart LR"] + outside
+    for title, lines in (("バウンダリ", boundary), ("コントローラ", [f"    {un}([{kl('UC', uc)}])"]), ("エンティティ", entity)):
+        if lines:
+            b += [f"  subgraph {ids('sg', title)}[{ql(title)}]"] + lines + ["  end"]
+    b += edges + kind_classes(ids)
     if all(is_hyp(r) for r in m.ucs[uc]):
         b += ["  " + HYP_STYLE, f"  class {un} hyp"]
     return mermaid(b)
@@ -846,6 +861,14 @@ def diagram_state(m, sm, max_ucs=None):
                 label += "(仮説)"
             label = label.replace(":", "：")
             b.append(f"  {ids('s', r['状態'])} --> {ids('s', nxt)} : {label}")
+    # 遷移が書かれていれば、最初の行の状態を開始、入ってくるが出ていかない状態を終了とする
+    if any(multi(r["遷移先"]) for r in rows):
+        b.append(f"  [*] --> {ids('s', rows[0]['状態'])}")
+        outgoing = {r["状態"] for r in rows if multi(r["遷移先"])}
+        incoming = {t for r in rows for t in multi(r["遷移先"])}
+        for st in m.states_of(sm):
+            if st in incoming and st not in outgoing:
+                b.append(f"  {ids('s', st)} --> [*]")
     if hyps:
         b.append("  " + HYP_STYLE)
         b.append(f"  class {','.join(sorted(hyps))} hyp")
@@ -875,37 +898,90 @@ def diagram_conditions(m):
     return mermaid(b)
 
 
+# 背景の次に表で出す章: (PRDのid, 見出し, 00_ゴール の表, ID の後に並べる列)
+PLAN_SECTIONS = [("purpose", "目的", "ゴール", ["ゴール", "達成の判断基準", "説明"]),
+                 ("scope", "スコープ", "スコープ", ["区分", "内容", "理由"]),
+                 ("done", "完了の定義", "完了の定義", ["完了条件", "確認方法"]),
+                 ("milestones", "マイルストーン", "マイルストーン", ["マイルストーン", "時期", "内容"]),
+                 ("risks", "リスク", "リスク", ["リスク", "影響", "対応方針", "対策"])]
+PLAN_EMPTY = "まだ決まっていない"
+
+
+def plan_markdown(m):
+    """diagrams.md の目的〜リスクの章。PRD と同じ表にする。"""
+    hyp = lambda r: "(仮説)" if is_hyp(r) else ""
+    out = []
+    for _, title, tname, cols in PLAN_SECTIONS:
+        rows = [r for r in m.t[tname] if r["ID"]]
+        out += [f"## {title}", ""]
+        out += [md_table(["ID"] + cols, [[r["ID"] + hyp(r)] + [r[c] for c in cols] for r in rows]) if rows else PLAN_EMPTY, ""]
+    return out
+
+
+def info_activities(m):
+    """情報 -> その情報を扱うアクティビティ(表の順)。"""
+    use = {}
+    for rows in m.bucs.values():
+        for r in rows:
+            for i in multi(r["情報"]):
+                use.setdefault(i, [])
+                if r["アクティビティ"] and r["アクティビティ"] not in use[i]:
+                    use[i].append(r["アクティビティ"])
+    return use
+
+
+def infos_by_context(m):
+    by_c = {}
+    for r in m.infos.values():
+        by_c.setdefault(r["コンテキスト"] or "(未分類)", []).append(r)
+    return by_c
+
+
+def cond_markdown(m, cond):
+    """条件の表を Markdown の表にする(形は prd_cond_table と同じ)。"""
+    g = cond_grid(m, cond)
+    if not g:
+        return []
+    omitted, head, body = g
+
+    def cell(kind, x):
+        if kind == "h":
+            return f"**{x}**"
+        if kind == "v":
+            return x
+        return "未定" if x is None else x["結果"] + ("(仮説)" if is_hyp(x) else "")
+    out = [f"{'、'.join(omitted)}がどの値でも、結果は表のとおり", ""] if omitted else []
+    return out + [md_table([h.replace("\n", " / ") for h in head], [[cell(k, x) for k, x in row] for row in body])]
+
+
 def build_diagrams(d):
-    """PRD と同じ章立て・同じ図で diagrams.md を作る。要求のつながりと条件の図は diagrams.md にだけある。"""
+    """PRD と同じ章立て・同じ図で diagrams.md を作る。条件の図は diagrams.md にだけある。"""
     m = Model(d)
-    out = [f"# {system_name(d)} ダイアグラム", "",
-           "> `rdra.py diagrams` で表から生成。手で編集しない。点線・橙色は仮説。", ""]
+    out = [f"# {system_name(d)} ダイアグラム", ""]
 
     def fig(md, caption=""):
         return [md] + ([f"{caption}", ""] if caption else [])
 
     bg = [r for r in m.t["背景"] if r["背景"]]
-    if bg or m.goals:
-        out += ["## 目的", ""]
-        hyp = lambda r: "(仮説)" if is_hyp(r) else ""
-        if bg:
-            out += ["### 背景", ""] + [f"- {r['背景']}{hyp(r)}" for r in bg] + [""]
-        if m.goals:
-            out += ["### ゴール", ""]
-            for g, r in m.goals.items():
-                out.append(f"- **{g}** {r['ゴール']}{hyp(r)}")
-                if r["達成の判断基準"]:
-                    out.append(f"  - 達成の判断基準: {r['達成の判断基準']}")
-            out.append("")
+    hyp = lambda r: "(仮説)" if is_hyp(r) else ""
+    if bg:
+        out += ["## 背景", ""] + [f"- {r['背景']}{hyp(r)}" for r in bg] + [""]
+    out += plan_markdown(m)
     out += ["## システムコンテキスト", ""] + fig(diagram_context(m, system_name(d)), "システムと、使う人・つながる他のシステム")
-    if m.goals or m.reqs:
-        out += ["## 要求", ""] + fig(diagram_requirements(m), "ゴール → 要求 → BUC のつながり")
+    for label, pool in (("アクター", m.actors), ("外部システム", m.exts)):
+        out += [f"### {label}", ""]
+        out += [md_table([label, "説明"], [[n + hyp(r), r["説明"]] for n, r in pool.items()]) if pool else "まだない", ""]
+    if m.reqs:
+        order = [k for k, _, _ in REQ_KIND]
+        reqs = sorted(m.reqs.values(), key=lambda r: order.index(r["種別"]) if r["種別"] in order else len(order))
+        out += ["## 要求", "", md_table(["ID", "種別", "要求", "説明", "ゴールID"],
+                                      [[r["ID"] + hyp(r), r["種別"], r["要求"], r["説明"], r["ゴールID"]] for r in reqs]), ""]
     if m.bucs:
         out += ["## 業務フロー", ""]
         if len(m.groups()) > 1:
-            out += ["### ビジネスコンテキスト", ""] + fig(prd_business_flow(m), "業務と、関わるアクター・外部システム。点線は仮説のつながり")
+            out += ["### ビジネスコンテキスト", ""] + fig(business_diagram(m), "業務と、関わるアクター・外部システム。点線は仮説のつながり")
         for g in m.groups():
-            out += [f"### {g}", "", "#### ビジネスユースケース", ""] + fig(prd_overall_flow(m, g), "BUCと、関わるアクター・外部システム。点線は仮説のつながり")
+            out += [f"### {g}", "", "#### ビジネスユースケース", ""] + fig(business_diagram(m, g), "BUCと、関わるアクター・外部システム。点線は仮説のつながり")
             if m.flow(g)[0]:
                 out += ["#### 業務フロー", ""] + fig(diagram_flow(m, g, wrap=4), f"{g}の業務フロー。アクティビティを担当ごとの枠に置き、流れの順に矢印でつないだもの")
             for (gg, buc), rows in m.bucs.items():
@@ -917,14 +993,32 @@ def build_diagrams(d):
                     out += [f"##### UC: {uc}", "", diagram_uc(m, uc)]
     if m.infos:
         out += ["## 情報", ""] + fig(prd_info_diagram(m), "矢印の文字は数の関係(例: 1対多 = 左の1つに右が複数)。点線は多対多")
+        use = info_activities(m)
+        for c, rows in infos_by_context(m).items():
+            out += [f"### {c}", "", md_table(["情報", "説明", "主な項目", "状態・バリエーション", "使うアクティビティ"], [
+                [r["情報"] + hyp(r), r["説明"], "、".join(multi(r["属性"])) or "未定",
+                 " / ".join([f"{sm}(状態: {'、'.join(m.states_of(sm))})" for sm in multi(r["状態モデル"])]
+                            + [f"{v}({m.vars[v]['値'] if v in m.vars else '値は未定'})" for v in multi(r["バリエーション"])]) or "なし",
+                 "、".join(use.get(r["情報"], [])) or "なし"] for r in rows])]
+        if m.t["情報関連"]:
+            out += ["### 情報のつながり", "", md_table(["情報", "多重度", "関連先"],
+                                                [[r["情報"], r["多重度"] + hyp(r), r["関連先"]] for r in m.t["情報関連"]])]
     if m.state_models:
         out += ["## 状態遷移", ""]
         for sm, rows in m.state_models.items():
             out += [f"### {sm}", ""]
             cap = "丸が状態、矢印の文字がその状態に移すUC" if any(r["遷移先"] for r in rows) else "どのUCでどの状態に移るかは、まだ決まっていない"
             out += fig(diagram_state(m, sm, max_ucs=3), cap)
-    if m.conds:
-        out += ["## 条件", "", diagram_conditions(m)]
+            trans = [r for r in rows if r["遷移先"]]
+            if trans:
+                out += [md_table(["状態", "遷移先", "遷移UC"], [[r["状態"], r["遷移先"] + hyp(r), r["遷移UC"]] for r in trans])]
+    if m.conds or m.vars:
+        out += ["## 条件", ""] + ([diagram_conditions(m)] if m.conds else [])
+        for c, r in m.conds.items():
+            out += [f"### {c}{hyp(r)}", ""] + ([r["説明"], ""] if r["説明"] else []) + cond_markdown(m, c)
+        if m.vars:
+            out += ["### バリエーション", "", md_table(["バリエーション", "値"],
+                                                [[r["バリエーション"] + hyp(r), r["値"]] for r in m.vars.values()])]
     (d / "diagrams.md").write_text("\n".join(out), encoding="utf-8")
 
 
@@ -1296,7 +1390,7 @@ REQ_KIND = [("機能", "機能", "システムでできること。画面で入�
             ("非機能", "非機能", "機能をどれだけ快適・安全に使えるか。速さ、使える端末、個人情報の守り方など"),
             ("ポリシー", "方針", "システムの作り方ではなく、事業・運営として決めること。"
              "料金、だれ向けのサービスか、データをいつ消すか、制度改正への追従など"),
-            (OUT_OF_SCOPE, "スコープ外", "このシステムでやらないと決めたこと")]
+            (OUT_OF_SCOPE, "対象外", "要望として出たが、議論の結果やらないと決めた要求")]
 
 
 def source_badge(src):
@@ -1350,21 +1444,37 @@ def prd_info_diagram(m):
     return mermaid(b)
 
 
-def prd_party_diagram(nodes):
-    """nodes(ノードID種別, 名前, 図形の左右の記号, 行) を中央に置き、関わるアクター(左)・
-    外部システム(右)と線でつなぐ(向きは持たない)。仮説の行でしか関わらないつながりは点線にする。"""
+def business_diagram(m, group=None):
+    """業務・BUCと、関わるアクター(左)・外部システム(右)を線でつなぐ(向きは持たない)。
+    group を渡すとその業務を枠にして中にBUCを置き、線はBUCごとに引く。渡さなければ業務だけを並べ、
+    線は業務に引く(BUCまで描くと大きすぎるため)。仮説の行でしか関わらないつながりは点線にする。"""
     ids = Ids()
     b = ["flowchart LR"]
     hyps, links = [], []
-    for kind, name, (l, r), rows in nodes:
-        n = ids(kind, name)
-        b.append(f"  {n}{l}{ql(name)}{r}")
-        if rows and all(is_hyp(x) for x in rows):
-            hyps.append(n)
-        for col, k in [("アクター", "a"), ("外部システム", "e")]:
-            for w in dict.fromkeys(w for x in rows for w in multi(x[col])):
-                hyp = all(is_hyp(x) for x in rows if w in multi(x[col]))
-                links.append((k, w, n, hyp))
+    for g in m.groups():
+        if group is not None and g != group:
+            continue
+        bucs = [(buc, rows) for (gg, buc), rows in m.bucs.items() if gg == g]
+        if group is None:
+            gn = ids("g", g)
+            g_rows = [x for _, rows in bucs for x in rows]
+            b.append(f"  {gn}[{ql(g)}]")
+            if all(is_hyp(x) for x in g_rows):
+                hyps.append(gn)
+            targets = [(gn, g_rows)]
+        else:
+            b.append(f"  subgraph {ids('g', g)}[{ql(g)}]")
+            for buc, rows in bucs:
+                n = ids("b", buc)
+                b.append(f"    {n}([{ql(buc)}])")
+                if all(is_hyp(x) for x in rows):
+                    hyps.append(n)
+            b.append("  end")
+            targets = [(ids("b", buc), rows) for buc, rows in bucs]
+        for n, rows in targets:
+            for col, k in [("アクター", "a"), ("外部システム", "e")]:
+                for w in dict.fromkeys(w for x in rows for w in multi(x[col])):
+                    links.append((k, w, n, all(is_hyp(x) for x in rows if w in multi(x[col]))))
     for k, w, n, hyp in links:
         line = "-.-" if hyp else "---"
         if k == "a":
@@ -1378,62 +1488,60 @@ def prd_party_diagram(nodes):
     return mermaid(b)
 
 
-def prd_business_flow(m):
-    """業務と、その業務に関わるアクター・外部システムの図。"""
-    rows_g = {}
-    for (g, _), rows in m.bucs.items():
-        rows_g.setdefault(g, []).extend(rows)
-    return prd_party_diagram([("g", g, ("[", "]"), rows) for g, rows in rows_g.items()])
-
-
-def prd_overall_flow(m, group=None):
-    """BUCと、そのBUCに関わるアクター・外部システムの図(group を渡すとその業務のBUCだけ)。"""
-    return prd_party_diagram([("b", buc, ("([", "])"), rows) for (g, buc), rows in m.bucs.items()
-                              if group is None or g == group])
-
-
 QREF_PAREN = re.compile(r"[((]\s*Q-\d+(?:\s*[、,・]\s*Q-\d+)*\s*[))]")
 
 
 DETAIL_KIND = {"i": "情報", "c": "条件", "sm": "状態モデル"}
 
 
-def prd_cond_table(m, cond):
-    """条件の表を、軸の数に合う形の表(HTML)にする。軸1つは値と結果、軸2つは縦横の表、3つ以上は組合せの一覧。"""
-    from html import escape
-
-    def e(v):
-        return escape(QREF_PAREN.sub("", v))
-
+def cond_grid(m, cond):
+    """条件の表を、軸の数に合う形に組み立てる。軸1つは値と結果、軸2つは縦横の表、3つ以上は組合せの一覧。
+    どの行も「すべて」の軸は結果を分けないので、表からは省いて名前を返す。
+    返り値: (省いた軸の名前, 見出し(改行は \\n), 行)。行のセルは ("h", 行見出し) / ("v", 値) /
+    ("r", 条件の表の行。None は未定)。条件の表がなければ None。"""
     rows = m.cond_cells.get(cond)
     axes = m.cond_axes(cond)
     if not rows or not axes:
-        return ""
-
-    def cell(r):
-        if r is None:
-            return '<td><span class="none">未定</span></td>'
-        hyp = ' <span class="badge hyp">仮説</span>' if is_hyp(r) else ""
-        return f'<td>{e(r["結果"])}{hyp}</td>'
-
-    # どの行も「すべて」の軸は結果を分けないので、表からは省いて注記する
+        return None
     vals = [multi(r["値"]) for r in rows]
     keep = [k for k in range(len(axes)) if any(len(v) == len(axes) and v[k] != ANY_VALUE for v in vals)]
-    note = "、".join(axes[k][0] for k in range(len(axes)) if k not in keep)
-    note = f'<div class="sub">{e(note)}がどの値でも、結果は表のとおり</div>' if note else ""
+    omitted = [axes[k][0] for k in range(len(axes)) if k not in keep]
     if len(keep) == 2:
         (a1, v1), (a2, v2) = (axes[k] for k in keep)
         at = {}
         for r in rows:
             for x in m.cell_combos(cond, r) or []:
                 at.setdefault((x[keep[0]], x[keep[1]]), r)
-        html = (f'<thead><tr><th>縦: {e(a1)}<br>横: {e(a2)}</th>' + "".join(f"<th>{e(v)}</th>" for v in v2) + "</tr></thead><tbody>"
-                + "".join(f"<tr><th>{e(x)}</th>" + "".join(cell(at.get((x, y))) for y in v2) + "</tr>" for x in v1))
-    else:
-        head = "".join(f"<th>{e(axes[k][0])}</th>" for k in keep)
-        html = (f"<thead><tr>{head}<th>結果</th></tr></thead><tbody>"
-                + "".join("<tr>" + "".join(f"<td>{e(v[k] if len(v) == len(axes) else '')}</td>" for k in keep)
-                          + cell(r) + "</tr>" for r, v in zip(rows, vals)))
+        return omitted, [f"縦: {a1}\n横: {a2}"] + v2, [[("h", x)] + [("r", at.get((x, y))) for y in v2] for x in v1]
+    return (omitted, [axes[k][0] for k in keep] + ["結果"],
+            [[("v", v[k] if len(v) == len(axes) else "") for k in keep] + [("r", r)] for r, v in zip(rows, vals)])
+
+
+def prd_cond_table(m, cond):
+    """条件の表(HTML)。形は cond_grid のとおり。"""
+    from html import escape
+
+    def e(v):
+        return escape(QREF_PAREN.sub("", v))
+
+    g = cond_grid(m, cond)
+    if not g:
+        return ""
+    omitted, head, body = g
+
+    def cell(kind, x):
+        if kind == "h":
+            return f"<th>{e(x)}</th>"
+        if kind == "v":
+            return f"<td>{e(x)}</td>"
+        if x is None:
+            return '<td><span class="none">未定</span></td>'
+        hyp = ' <span class="badge hyp">仮説</span>' if is_hyp(x) else ""
+        return f'<td>{e(x["結果"])}{hyp}</td>'
+
+    note = f'<div class="sub">{e("、".join(omitted))}がどの値でも、結果は表のとおり</div>' if omitted else ""
+    html = ("<thead><tr>" + "".join("<th>" + "<br>".join(e(p) for p in h.split("\n")) + "</th>" for h in head)
+            + "</tr></thead><tbody>" + "".join("<tr>" + "".join(cell(k, x) for k, x in row) + "</tr>" for row in body))
     return f'{note}<div class="tbl cond-tbl"><table>{html}</tbody></table></div>'
 
 
@@ -1502,14 +1610,7 @@ def build_prd(d):
     open_qs = [q for q in qs.values() if q_status(q) in UNRESOLVED]
     done_qs = [q for q in qs.values() if q_status(q) in ("反映済", "許容")]
 
-    # 参照の逆引き
-    info_use = {}
-    for (g, buc), rows in m.bucs.items():
-        for r in rows:
-            for i in multi(r["情報"]):
-                info_use.setdefault(i, [])
-                if r["アクティビティ"] and r["アクティビティ"] not in info_use[i]:
-                    info_use[i].append(r["アクティビティ"])
+    info_use = info_activities(m)
 
     details = prd_details(m)
 
@@ -1520,20 +1621,18 @@ def build_prd(d):
         lead_html = f'<p class="lead">{lead}</p>' if lead else ""
         body.append(f'<section id="{sid}"><h2>{e(title)}</h2>{lead_html}{html}</section>')
 
-    # 1. 目的
-    parts = []
+    # 1. 背景、続けて目的(ゴール)・スコープ・完了の定義・マイルストーン・リスクの表
     bg = [r["背景"] for r in m.t["背景"] if r["背景"]]
     if bg:
-        parts.append('<h3>背景</h3><ul class="bg">' + "".join(f"<li>{e(x)}</li>" for x in bg) + "</ul>")
-    if m.goals:
-        parts.append('<h3>ゴール</h3><ul class="reqs">' + "".join(
-            f'<li><span class="rid">{e(g)}</span><div class="rbody"><div class="rtitle">{e(r["ゴール"])}'
-            + "</div>"
-            + (f'<div class="rdesc">達成の判断基準: {e(r["達成の判断基準"])}</div>' if r["達成の判断基準"] else "")
-            + (f'<div class="rdesc">{e(r["説明"])}</div>' if e(r["説明"]) else "")
-            + "</div></li>" for g, r in m.goals.items()) + "</ul>")
-    if parts:
-        section("purpose", "目的", "".join(parts) + memo("purpose", "目的"))
+        section("background", "背景", '<ul class="bg">' + "".join(f"<li>{e(x)}</li>" for x in bg) + "</ul>"
+                + memo("background", "背景"))
+    for sid, title, tname, cols in PLAN_SECTIONS:
+        rows = [r for r in m.t[tname] if r["ID"]]
+        html = ('<div class="tbl"><table><thead><tr><th>ID</th>' + "".join(f"<th>{e(c)}</th>" for c in cols)
+                + "</tr></thead><tbody>" + "".join(
+                    f'<tr><td>{e(r["ID"])}</td>' + "".join(f"<td>{e(r[c])}</td>" for c in cols) + "</tr>" for r in rows)
+                + "</tbody></table></div>") if rows else f'<p class="none">{PLAN_EMPTY}</p>'
+        section(sid, title, html + memo(sid, title))
 
     # 2. 使う人
     cards = []
@@ -1566,13 +1665,13 @@ def build_prd(d):
 
     # 4. 業務フロー
     multi_g = len({g for g, _ in m.bucs}) > 1
-    html = ("<h3>ビジネスコンテキスト</h3>" + prd_figure(prd_business_flow(m), "業務と、関わるアクター・外部システム。点線は仮説のつながり")) if multi_g else ""
+    html = ("<h3>ビジネスコンテキスト</h3>" + prd_figure(business_diagram(m), "業務と、関わるアクター・外部システム。点線は仮説のつながり")) if multi_g else ""
     by_g = {}
     for (g, buc), rows in m.bucs.items():
         by_g.setdefault(g, []).append((buc, rows))
     for g, bucs in by_g.items():
         html += f'<h3>{e(g)}</h3>'
-        html += '<h4>ビジネスユースケース</h4>' + prd_figure(prd_overall_flow(m, g), "BUCと、関わるアクター・外部システム。点線は仮説のつながり")
+        html += '<h4>ビジネスユースケース</h4>' + prd_figure(business_diagram(m, g), "BUCと、関わるアクター・外部システム。点線は仮説のつながり")
         if m.flow(g)[0]:
             html += '<h4>業務フロー</h4>' + prd_figure(diagram_flow(m, g, wrap=4), f"{g}の業務フロー。アクティビティを担当ごとの枠に置き、流れの順に矢印でつないだもの")
         for buc, rows in bucs:
@@ -1627,9 +1726,8 @@ def build_prd(d):
 
     # 5. 情報
     html = prd_figure(prd_info_diagram(m), "矢印の文字は数の関係(例: 1対多 = 左の1つに右が複数)。点線は多対多") if m.infos else ""
-    by_c = {}
-    for name, r in m.infos.items():
-        by_c.setdefault(r["コンテキスト"] or "(未分類)", []).append(r)
+    by_c = infos_by_context(m)
+
     def kinds(r):
         """情報が持つ状態モデルとバリエーションを、名前と取りうる値で示す。"""
         out = [f'<div>{chips([sm])}<div class="sub">状態: {e("、".join(m.states_of(sm)))}</div></div>'
@@ -1727,6 +1825,9 @@ def build_prd(d):
     header = (f'<header class="top"><div class="eyebrow">要件定義書(PRD)</div>'
               f'<h1>{e(sysname)}</h1><div class="meta">{now.year}年{now.month}月{now.day}日 {now:%H:%M} 時点</div>{stats}'
               '<details class="guide"><summary>この資料の読み方</summary><dl>'
+              '<dt>ゴール</dt><dd>システムで達成したい事業の成果。達成したかはリリースの後に判断する</dd>'
+              '<dt>完了の定義</dt><dd>このプロジェクトを終えてよい条件。リリースのときに判断する</dd>'
+              '<dt>スコープ</dt><dd>システムが扱う範囲(対象・対象外)。やらないと決めた個々の要求は、要求の「対象外」に出す</dd>'
               '<dt>システムコンテキスト</dt><dd>システムを使う人(アクター)と、つながる他のシステム(外部システム)</dd>'
               '<dt>ビジネスコンテキスト</dt><dd>業務と、それぞれに関わるアクター・外部システムの全体像</dd>'
               '<dt>BUC(ビジネスユースケース)</dt><dd>一連の仕事の流れ(例: 利用を始める)。アクティビティを順番に並べたもの</dd>'
